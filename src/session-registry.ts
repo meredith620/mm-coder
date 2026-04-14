@@ -1,6 +1,7 @@
 import { v4 as uuidv4 } from 'uuid';
 import type { Session, QueuedMessage, IMBinding } from './types.js';
 import { SessionStateMachine, INVALID_STATE_TRANSITION } from './session-state-machine.js';
+import type { PersistenceStore } from './persistence.js';
 
 class Mutex {
   private _queue: Array<() => void> = [];
@@ -40,6 +41,12 @@ export class SessionRegistry {
   // exposed for tests via ['_sessions']
   _sessions: Map<string, Session> = new Map();
   private _mutexes: Map<string, Mutex> = new Map();
+  private _store: PersistenceStore | null;
+
+  constructor(store?: PersistenceStore) {
+    this._store = store ?? null;
+    if (this._store) this._store.attach(this);
+  }
 
   private _getMutex(name: string): Mutex {
     let m = this._mutexes.get(name);
