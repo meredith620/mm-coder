@@ -98,11 +98,11 @@ describe('SessionRegistry', () => {
     expect(s.messageQueue).toHaveLength(1); // IM 消息已入队
   });
 
-  test('attach 期间 IM 不入队（直接返回 SESSION_BUSY）', () => {
+  test('attach 期间 IM 入队（SPEC §3.9：attached 时默认入队）', () => {
     registry.create('s10', { workdir: '/tmp', cliPlugin: 'claude-code' });
     registry.markAttached('s10', 1111);
-    expect(() => registry.enqueueIMMessage('s10', { text: 'hello', dedupeKey: 'k2' }))
-      .toThrow('SESSION_BUSY');
+    registry.enqueueIMMessage('s10', { text: 'hello', dedupeKey: 'k2' });
+    expect(registry.get('s10')!.messageQueue).toHaveLength(1);
   });
 
   test('get 不存在的 session 返回 undefined', () => {

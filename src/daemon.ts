@@ -6,12 +6,12 @@ import type { ErrorCode } from './ipc/codec.js';
 
 export class Daemon {
   private _server: IPCServer;
-  private _registry: SessionRegistry;
+  registry: SessionRegistry;
   private _acl: AclManager;
 
   constructor(socketPath: string) {
     this._server = new IPCServer(socketPath);
-    this._registry = new SessionRegistry();
+    this.registry = new SessionRegistry();
     this._acl = new AclManager();
     this._registerHandlers();
   }
@@ -33,7 +33,7 @@ export class Daemon {
 
       let session;
       try {
-        session = this._registry.create(name, { workdir, cliPlugin: cli });
+        session = this.registry.create(name, { workdir, cliPlugin: cli });
       } catch (err) {
         const code: ErrorCode = 'SESSION_ALREADY_EXISTS';
         const e = new Error((err as Error).message) as Error & { code: ErrorCode };
@@ -50,13 +50,13 @@ export class Daemon {
     });
 
     this._server.handle('list', async () => {
-      const sessions = this._registry.list().map(s => this._serializeSession(s));
+      const sessions = this.registry.list().map(s => this._serializeSession(s));
       return { sessions };
     });
 
     this._server.handle('remove', async (args, actor) => {
       const name = args['name'] as string;
-      const session = this._registry.get(name);
+      const session = this.registry.get(name);
 
       if (!session) {
         const e = new Error(`Session not found: ${name}`) as Error & { code: ErrorCode };
@@ -66,19 +66,19 @@ export class Daemon {
 
       this._checkAcl(actor, 'remove', session);
 
-      this._registry.remove(name);
+      this.registry.remove(name);
       return {};
     });
 
     this._server.handle('status', async () => {
-      const sessions = this._registry.list().map(s => this._serializeSession(s));
+      const sessions = this.registry.list().map(s => this._serializeSession(s));
       return { pid: process.pid, sessions };
     });
 
     this._server.handle('attach', async (args, actor) => {
       const name = args['name'] as string;
       const pid = args['pid'] as number;
-      const session = this._registry.get(name);
+      const session = this.registry.get(name);
 
       if (!session) {
         const e = new Error(`Session not found: ${name}`) as Error & { code: ErrorCode };
@@ -88,8 +88,26 @@ export class Daemon {
 
       this._checkAcl(actor, 'attach', session);
 
-      this._registry.markAttached(name, pid);
-      return { session: this._serializeSession(this._registry.get(name)!) };
+      // initState guard: concurrent init in progress
+      if (session.initState === 'initializing') {
+        const e = new Error('SESSION_BUSY') as Error & { code: ErrorCode };
+        e.code = 'SESSION_BUSY';
+        throw e;
+      }
+
+      // lazy init on first attach (first-writer-wins)
+      if (session.initState === 'uninitialized') {
+        await this.registry.beginInitAndAttach(name, pid);
+      } else {
+        // markAttached handles im_processing → attach_pending via state machine
+        this.registry.markAttached(name, pid);
+      }
+
+      const updated = this.registry.get(name)!;
+      if (updated.status === 'attach_pending') {
+        return { waitRequired: true, session: this._serializeSession(updated) };
+      }
+      return { session: this._serializeSession(updated) };
     });
   }
 

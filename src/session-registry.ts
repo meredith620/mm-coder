@@ -34,7 +34,12 @@ export interface CreateOptions {
 
 export interface EnqueueOptions {
   text: string;
-  dedupeKey: string;
+  dedupeKey?: string;
+  plugin?: string;
+  threadId?: string;
+  messageId?: string;
+  userId?: string;
+  receivedAt?: string;
 }
 
 export class SessionRegistry {
@@ -201,20 +206,18 @@ export class SessionRegistry {
     }
   }
 
-  // P1: enqueue IM message — rejected when session is attached
+  // P1: enqueue IM message — queued when attached (SPEC §3.9), queue frozen when attach_pending
   enqueueIMMessage(name: string, opts: EnqueueOptions): void {
     const s = this._getOrThrow(name);
-    if (s.status === 'attached' || s.status === 'attach_pending') {
-      throw new Error('SESSION_BUSY');
-    }
+    const dedupeKey = opts.dedupeKey ?? `${opts.plugin ?? ''}:${opts.threadId ?? ''}:${opts.messageId ?? ''}`;
     const msg: QueuedMessage = {
-      messageId: uuidv4(),
-      threadId: '',
-      userId: '',
+      messageId: opts.messageId ?? uuidv4(),
+      threadId: opts.threadId ?? '',
+      userId: opts.userId ?? '',
       content: opts.text,
       status: 'pending',
       correlationId: uuidv4(),
-      dedupeKey: opts.dedupeKey,
+      dedupeKey,
       enqueuePolicy: 'auto_after_detach',
     };
     s.messageQueue.push(msg);
