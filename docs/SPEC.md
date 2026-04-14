@@ -46,7 +46,7 @@ $ mm-coder attach bug-fix                       # 再次启动 Claude Code，自
 终端和 IM 使用不同的交互通道访问同一个 AI CLI 会话：
 
 - **终端**：直接运行 AI CLI 命令（如 `claude --resume <id>`），用户看到的就是原生 Claude Code，没有任何代理层
-- **IM**：Daemon 为每个 session 维护一个**长驻**的 `claude -p --input-format stream-json --output-format stream-json` 进程，通过 stdin 写入消息、从 stdout 读取事件流；审批结果通过 `sendToolResult` 直接写回 stdin，无需 MCP server 中转
+- **IM**：Daemon 为每个 session 维护一个**长驻**的 `claude -p --input-format stream-json --output-format stream-json` 进程，通过 stdin 写入消息、从 stdout 读取事件流；权限审批通过 `--permission-prompt-tool` 路由到 daemon MCP server（`can_use_tool`），由 daemon 异步返回 allow/deny
 - **互斥**：同一 session 同一时刻只有一端在操作。终端在用时 IM 提示"会话正在终端使用中"
 
 ### 2.2 会话生命周期原则
@@ -128,10 +128,10 @@ IM 交互:
        → session 进入 im_processing
        → 通过 IM worker 的 stdin.write 投递消息（JSON 格式）
        → 从 IM worker stdout 流式读取 CLIEvent
-       → 若出现审批请求事件：
+       → 若出现权限审批请求（通过 permission-prompt-tool → daemon MCP server）:
           → session 进入 approval_pending
           → daemon 向 IM 发送带 requestId 的审批请求
-          → 用户审批后，通过 sendToolResult 写回 stdin，session 回到 im_processing
+          → 用户审批后，daemon MCP server 返回 allow/deny，session 回到 im_processing
        → 发送格式化结果到对应 thread
        → session 变回 idle，IM worker 保持存活等待下条消息
     → 如果 idle（IM worker 尚未启动，首条消息触发懒启动）:
@@ -224,7 +224,53 @@ class SessionRegistry {
 }
 ```
 
-### 3.3 CLI 命令
+### 3.3 IMWorkerManager
+
+```typescript
+class IMWorkerManager {
+  spawn(session: Session): Promise<number>;              // 启动 claude -p 长驻进程，返回 pid
+  terminate(name: string, signal?: 'SIGTERM' | 'SIGKILL'): Promise<void>;
+  sendMessage(name: string, prompt: string): Promise<void>; // stdin.write(JSONL)
+  isAlive(name: string): boolean;                        // process.kill(pid, 0)
+  restartIfCrashed(name: string): Promise<void>;         // exit code ≠ 0 时触发
+}
+```
+
+职责：
+- 管理每个 session 的 IM worker 子进程生命周期
+- 维护 `imWorkerPid` 与 `imWorkerCrashCount`
+- 处理懒启动 / pre-warm / 崩溃重启
+
+### 3.4 ApprovalManager（daemon MCP server）
+
+```typescript
+interface ApprovalDecision {
+  requestId: string;
+  behavior: 'allow' | 'deny';
+  reason?: string;
+}
+
+class ApprovalManager {
+  canUseTool(input: {
+    sessionId: string;
+    toolName: string;
+    toolInput: Record<string, unknown>;
+    toolUseId: string;
+  }): Promise<ApprovalDecision>;
+
+  applyRules(toolName: string, toolInput: Record<string, unknown>): 'allow' | 'deny' | 'ask';
+  requestIMApproval(session: Session, req: ApprovalRequest): Promise<ApprovalDecision>;
+  expirePendingOnRestart(): Promise<void>; // pending -> expired (fail-closed)
+}
+```
+
+职责：
+- 在 daemon 内实现 MCP `can_use_tool` 处理逻辑
+- 执行 autoAllow / autoDeny 规则匹配
+- 路由 IM 审批并等待异步结果
+- 维护审批状态机：`pending / approved / denied / expired / cancelled`
+
+### 3.5 CLI 命令
 
 ```
 mm-coder start                              启动 daemon
@@ -236,6 +282,96 @@ mm-coder remove <name>                      删除会话
 mm-coder tui                                连接 daemon，实时监控面板
 mm-coder status                             daemon 和会话状态
 ```
+
+### 3.6 Session 状态迁移规则
+
+合法状态迁移：
+
+| 当前状态 | 触发事件 | 目标状态 |
+|----------|----------|----------|
+| `idle` | `attach_start` | `attached` |
+| `idle` | `im_message_received` | `im_processing` |
+| `attached` | `attach_exit_normal` | `idle` |
+| `attached` | `takeover_requested` | `takeover_pending` |
+| `takeover_pending` | `terminal_sigterm_exited` | `idle` |
+| `im_processing` | `tool_permission_required` | `approval_pending` |
+| `approval_pending` | `approval_approved` | `im_processing` |
+| `approval_pending` | `approval_denied` | `im_processing` |
+| `approval_pending` | `approval_timeout_or_restart` | `idle` |
+| `im_processing` | `message_completed` | `idle` |
+| `im_processing` | `worker_crash` | `recovering` |
+| `recovering` | `worker_restarted` | `idle` |
+| `recovering` | `restart_failed_over_limit` | `error` |
+| `error` | `manual_reset` | `idle` |
+
+非法迁移处理：
+- 任何未在上表声明的迁移都返回 `INVALID_STATE_TRANSITION` 错误
+- daemon 记录审计日志并保持原状态不变
+- IM/CLI 调用方收到可读错误：`Session state transition rejected: <from> -> <to>`
+
+状态字段与退出原因关系：
+- `lastExitReason='taken_over'`：由 `takeover_pending -> idle` 写入
+- `lastExitReason='cli_crash'`：attached 或 im_processing 进程异常退出写入
+- `lastExitReason='normal'`：终端主动退出写入
+- `lastExitReason='recovered'`：`recovering -> idle` 成功后写入
+
+### 3.7 IPC 协议（Unix socket）
+
+daemon 与 CLI/TUI 之间使用 **JSON Lines（每行一个 JSON）** 自定义协议。
+
+请求：
+```json
+{"type":"request","requestId":"req-uuid","command":"create","args":{"name":"bug-fix","workdir":"/path"}}
+```
+
+成功响应：
+```json
+{"type":"response","requestId":"req-uuid","ok":true,"data":{"session":{"name":"bug-fix","status":"idle"}}}
+```
+
+错误响应：
+```json
+{"type":"response","requestId":"req-uuid","ok":false,"error":{"code":"SESSION_NOT_FOUND","message":"Session 'foo' not found","details":{}}}
+```
+
+错误码（字符串）：
+- `INVALID_REQUEST`
+- `UNKNOWN_COMMAND`
+- `SESSION_ALREADY_EXISTS`
+- `SESSION_NOT_FOUND`
+- `INVALID_STATE_TRANSITION`
+- `WORKER_NOT_RUNNING`
+- `WORKER_SPAWN_FAILED`
+- `APPROVAL_TIMEOUT`
+- `INTERNAL_ERROR`
+
+命令清单（IPC command）：
+- `start`
+- `stop`
+- `status`
+- `create`
+- `list`
+- `remove`
+- `attach`
+- `takeover`
+- `open_thread`
+
+keepalive（长连接客户端，如 TUI）：
+
+客户端：
+```json
+{"type":"ping","ts":1713000000000}
+```
+
+daemon：
+```json
+{"type":"pong","ts":1713000000001}
+```
+
+规则：
+- 客户端每 15s 发送 `ping`
+- daemon 超过 45s 未收到 `ping` 可主动关闭连接
+- CLI 短连接命令可不发送心跳
 
 ---
 
@@ -577,6 +713,8 @@ src/
 ├── index.ts                 # CLI 入口（命令解析）
 ├── daemon.ts                # Daemon 主进程
 ├── session-registry.ts      # Session 注册表
+├── im-worker-manager.ts     # IM worker 生命周期管理
+├── approval-manager.ts      # MCP permission 审批管理
 │
 ├── plugins/
 │   ├── types.ts             # 插件接口定义
@@ -585,6 +723,9 @@ src/
 │   │   └── mattermost.ts
 │   └── cli/
 │       └── claude-code.ts
+│
+├── ipc/
+│   └── socket-server.ts     # Unix socket IPC
 │
 ├── config/
 │   └── index.ts
@@ -602,7 +743,7 @@ Phase 1: 核心骨架
   - Daemon + IPC 通信
   - SessionRegistry
   - CLI 命令（start/create/attach/list）
-  - Claude Code 插件（attach + message 命令构建）
+  - Claude Code 插件（attach + IM worker 命令构建）
 
 Phase 2: Mattermost 集成
   - IM 插件接口 + Mattermost 实现
