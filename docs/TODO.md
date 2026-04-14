@@ -44,21 +44,21 @@ Review 产出的待解决问题，按优先级排列。
 - [x] 懒启动策略：daemon 重启后不主动重建 IM worker，首条 IM 消息到来时 spawn，同时向 IM 发送"正在启动 Claude Code，请稍候..."
 - [x] Pre-warm 策略：`mm-coder attach` 退出后（session 仍在工作语义中），立即 spawn 新的 IM worker（`claude -p --resume <id> --input-format stream-json --output-format stream-json --verbose`）
 - [x] 崩溃重启策略：非正常退出（exit code ≠ 0）才重启；最大重试次数可配置（默认 3 次）；超出后 session → `error` 并通知 IM 用户
-- [ ] `imWorkerCrashCount` 连续崩溃计数重置规则：成功处理一条消息后清零
+- [x] `imWorkerCrashCount` 连续崩溃计数重置规则：成功处理一条消息后清零
 
 ### 接管机制
 
 - [x] 定义被接管退出 vs 正常退出的区分方式（daemon 预标记退出原因，attach 退出后查询）
-- [ ] 评估“软通知 + 宽限期 + 强制终止”的接管流程是否值得引入
-- [ ] 确保 `attachedPid` 是 spawn 的直接子进程 PID，避免进程树多层导致 kill 错误进程
+- [x] 评估”软通知 + 宽限期 + 强制终止”的接管流程是否值得引入 — 已在 §3.9 定版：hard（默认）vs soft（graceSeconds=30）两种策略，CLI 和 IM 均可指定
+- [x] 确保 `attachedPid` 是 spawn 的直接子进程 PID，避免进程树多层导致 kill 错误进程 — 已在 §3.2 明确：attachedPid 记录 mm-coder attach 进程 PID，kill 前验证 pid 存活
 
 ### 安全模型
 
 - [x] IM 端用户鉴权：定义谁能发命令、谁能审批权限请求、谁能接管 session
 - [x] 审批状态机：`pending / approved / denied / expired / cancelled`
 - [x] 定义 fail-closed 策略：IM 不可达、daemon 崩溃、审批超时默认拒绝
-- [ ] 定义审批交互协议：`requestId` 生成、动作模型、旧审批失效规则
-- [ ] `autoDeny` 字符串匹配仅视为 best-effort，设计能力分类 + 风险等级策略
+- [x] 定义审批交互协议：`requestId` 生成、动作模型、旧审批失效规则 — 已在 §6 定版：requestId=`<sessionId>:<messageId>:<toolUseId>:<nonce>`，scope once/session，新请求自动 cancel 同 session 旧 pending
+- [x] `autoDeny` 字符串匹配仅视为 best-effort，设计能力分类 + 风险等级策略 — 已在 §6 定版：能力分级 read_only/file_write/shell_dangerous/network_destructive，三段配置
 
 ## P2: 接口补全
 
@@ -75,19 +75,19 @@ Review 产出的待解决问题，按优先级排列。
 - [x] `sendMessage` content 改为结构化类型，支持 text/markdown/file
 - [x] 增加 `updateMessage(target, messageId, content)` — 流式输出场景下更新同一条消息
 - [x] `requestApproval` 返回类型扩展为 `ApprovalResult`
-- [ ] 评估审批 scope 是否支持“本次 / 本 session”
+- [x] 评估审批 scope 是否支持”本次 / 本 session” — 已在 §3.4/§3.10 定版：支持 once | session 两级
 
 ### 类型定义
 
-- [ ] 定义 `IncomingMessage`、`MessageTarget`、`ApprovalRequest`、`ApprovalResult`、`CLIEvent` 等核心类型
+- [x] 定义 `IncomingMessage`、`MessageTarget`、`ApprovalRequest`、`ApprovalResult`、`CLIEvent` 等核心类型 — 已在 §3.10 定版
 
 ## P3: 设计补充
 
 ### 异常处理
 
-- [ ] `claude -p` 进程崩溃/超时的处理策略
-- [ ] API 限流错误的处理策略
-- [ ] daemon 崩溃后的恢复算法：session、pending message、pending approval 的保守重建
+- [x] `claude -p` 进程崩溃/超时的处理策略 — 已在 §3.8 定版：退避重启 1s/3s/10s，超阈值 → error
+- [x] API 限流错误的处理策略 — 已在 §3.8 定版：不杀进程，2次延迟重试（2s/5s），仍失败 → failed
+- [x] daemon 崩溃后的恢复算法：session、pending message、pending approval 的保守重建 — 已在 §3.8 定版
 
 ### 运行模式
 
@@ -105,8 +105,8 @@ Review 产出的待解决问题，按优先级排列。
 
 ### 排队消息
 
-- [ ] 定义终端 detach 后排队消息的自动处理行为
-- [ ] 定义 pending message 的恢复语义：daemon 重启后是重放、丢弃还是标记待确认
+- [x] 定义终端 detach 后排队消息的自动处理行为 — 已在 §3.9 定版：attached 期间入队，detach 后 FIFO 自动处理
+- [x] 定义 pending message 的恢复语义：daemon 重启后是重放、丢弃还是标记待确认 — 已在 §3.8/§3.9 定版：默认 replay，高风险降级 confirm
 
 ### 权限配置归属
 
@@ -114,14 +114,14 @@ Review 产出的待解决问题，按优先级排列。
 
 ### 命令一致性
 
-- [ ] 对齐 IM 命令和 CLI 命令的参数格式
-- [ ] 增加 `mm-coder import <session-id> [--name] [--workdir]` 命令，支持导入外部启动的 Claude Code session
+- [x] 对齐 IM 命令和 CLI 命令的参数格式 — 已在 §3.7 增加 CLI⇄IPC 命令参数对齐表
+- [x] 增加 `mm-coder import <session-id> [--name] [--workdir]` 命令，支持导入外部启动的 Claude Code session — 已在 §3.5/§3.7 定版
 
 ### 可观测性
 
-- [ ] 定义日志策略：级别、输出位置、关键操作审计日志
+- [x] 定义日志策略：级别、输出位置、关键操作审计日志 — 已在 §6 定版：daemon.log（结构化）+ audit.log（高风险操作），含 correlationId/requestId/operatorId
 - [x] 增加高风险操作审计日志：审批、接管、删除 session、危险工具调用
 
 ### Session 生命周期
 
-- [ ] 定义 session 清理策略：TTL / 手动归档 / 最大数量限制
+- [x] 定义 session 清理策略：TTL / 手动归档 / 最大数量限制 — 已在 §9 定版：TTL 标记 stale 非删除，手动归档/删除，运行中 session 不受 TTL 影响
