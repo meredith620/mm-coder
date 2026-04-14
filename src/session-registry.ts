@@ -201,6 +201,14 @@ export class SessionRegistry {
     s.lifecycleStatus = 'stale';
   }
 
+  markError(name: string, _reason?: string): void {
+    const s = this._getOrThrow(name);
+    // Force to error state regardless of current state
+    s.status = 'error';
+    s.revision += 1;
+    s.lastActivityAt = new Date();
+  }
+
   // P1: first-writer-wins lazy init + attach
   async beginInitAndAttach(name: string, pid: number): Promise<void> {
     const mutex = this._getMutex(name);
