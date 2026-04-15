@@ -244,9 +244,16 @@ export class SessionRegistry {
   }
 
   // P1: enqueue IM message — queued when attached (SPEC §3.9), queue frozen when attach_pending
-  enqueueIMMessage(name: string, opts: EnqueueOptions): void {
+  enqueueIMMessage(name: string, opts: EnqueueOptions): { alreadyExists: boolean; existingStatus?: string } {
     const s = this._getOrThrow(name);
     const dedupeKey = opts.dedupeKey ?? `${opts.plugin ?? ''}:${opts.threadId ?? ''}:${opts.messageId ?? ''}`;
+
+    // Dedup check
+    const existing = s.messageQueue.find(m => m.dedupeKey === dedupeKey);
+    if (existing) {
+      return { alreadyExists: true, existingStatus: existing.status };
+    }
+
     const msg: QueuedMessage = {
       messageId: opts.messageId ?? uuidv4(),
       threadId: opts.threadId ?? '',
@@ -258,5 +265,26 @@ export class SessionRegistry {
       enqueuePolicy: 'auto_after_detach',
     };
     s.messageQueue.push(msg);
+    return { alreadyExists: false };
+  }
+
+  replayMessage(name: string, originalDedupeKey: string): QueuedMessage {
+    const s = this._getOrThrow(name);
+    const original = s.messageQueue.find(m => m.dedupeKey === originalDedupeKey);
+    if (!original) throw new Error('MESSAGE_NOT_FOUND');
+
+    const newMsg: QueuedMessage = {
+      messageId: uuidv4(),
+      threadId: original.threadId,
+      userId: original.userId,
+      content: original.content,
+      status: 'pending',
+      correlationId: uuidv4(),
+      dedupeKey: uuidv4(),
+      enqueuePolicy: original.enqueuePolicy,
+      replayOf: originalDedupeKey,
+    };
+    s.messageQueue.push(newMsg);
+    return newMsg;
   }
 }

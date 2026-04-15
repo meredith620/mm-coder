@@ -2,6 +2,7 @@ import { spawn, ChildProcess } from 'child_process';
 import type { SessionRegistry } from './session-registry.js';
 import type { CLIPlugin } from './plugins/types.js';
 import type { Session } from './types.js';
+import { Writable } from 'stream';
 
 const MAX_CRASH_COUNT = 3;
 const RESTART_DELAYS = [1000, 3000, 10000]; // ms
@@ -99,6 +100,45 @@ export class IMWorkerManager {
     const session = this._registry.get(name);
     if (session) {
       this._registry['_sessions'].get(name)!.imWorkerCrashCount = 0;
+    }
+  }
+
+  /** 向 IM worker stdin 写入 user 消息（JSONL 格式）；懒启动：若 worker 不存在则先 spawn */
+  async sendMessage(name: string, text: string): Promise<void> {
+    const session = this._registry.get(name);
+    if (!session) throw new Error('SESSION_NOT_FOUND');
+
+    // 懒启动
+    if (!this._processes.has(name)) {
+      await this.spawn(session);
+    }
+
+    const proc = this._processes.get(name);
+    if (!proc?.stdin) return;
+
+    const payload = JSON.stringify({
+      type: 'user',
+      message: {
+        role: 'user',
+        content: [{ type: 'text', text }],
+      },
+    });
+
+    await new Promise<void>((resolve, reject) => {
+      (proc.stdin as Writable).write(payload + '\n', (err) => {
+        if (err) reject(err);
+        else resolve();
+      });
+    });
+  }
+
+  /** pre-warm 钩子：attach 退出后立即启动 IM worker */
+  async onDetach(name: string): Promise<void> {
+    const session = this._registry.get(name);
+    if (!session) return;
+
+    if (!this._processes.has(name)) {
+      await this.spawn(session);
     }
   }
 
