@@ -94,4 +94,30 @@ describe('attach command', () => {
     });
     expect(daemon.registry.get('a5')!.messageQueue).toHaveLength(1);
   });
+
+  test('markDetached 将 attached session 转为 idle', async () => {
+    await client.send('create', { name: 'a6', workdir: '/tmp', cli: 'claude-code' });
+    await client.send('attach', { name: 'a6', pid: 9999 });
+
+    const s1 = daemon.registry.get('a6')!;
+    expect(s1.status).toBe('attached');
+
+    // Send markDetached via IPC handler
+    const res = await client.send('markDetached', { name: 'a6', exitReason: 'normal' });
+    expect(res.ok).toBe(true);
+
+    const s2 = daemon.registry.get('a6')!;
+    expect(s2.status).toBe('idle');
+  });
+
+  test('markDetached 后可以重新 attach', async () => {
+    await client.send('create', { name: 'a7', workdir: '/tmp', cli: 'claude-code' });
+    await client.send('attach', { name: 'a7', pid: 9999 });
+    await client.send('markDetached', { name: 'a7', exitReason: 'normal' });
+
+    // Re-attach should succeed
+    const res = await client.send('attach', { name: 'a7', pid: 10000 });
+    expect(res.ok).toBe(true);
+    expect(res.data!.session.status).toBe('attached');
+  });
 });

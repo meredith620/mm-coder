@@ -1,2 +1,7 @@
 dist
 node_modules
+.claude/
+*.pid
+*.sock
+*.tmp
+*.log

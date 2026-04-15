@@ -2,7 +2,7 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 import type { IMPlugin } from '../types.js';
-import type { MessageTarget, MessageContent, IncomingMessage, ApprovalRequest } from '../../types.js';
+import type { MessageTarget, MessageContent, IncomingMessage, ApprovalRequest, IMConfigGuide } from '../../types.js';
 
 export interface MattermostConfig {
   url: string;
@@ -30,13 +30,35 @@ export function getDefaultMattermostConfigPath(): string {
   return path.join(os.homedir(), '.mm-coder', 'config.json');
 }
 
-/**
- * Load Mattermost config from ~/.mm-coder/config.json.
- *
- * Supported JSON shapes:
- *   1) { "url": "...", "token": "...", "channelId": "..." }
- *   2) { "mattermost": { "url": "...", "token": "...", "channelId": "..." } }
- */
+export function ensureMattermostConfigDir(configPath = getDefaultMattermostConfigPath()): void {
+  fs.mkdirSync(path.dirname(configPath), { recursive: true });
+}
+
+export function getMattermostConfigGuide(configPath = getDefaultMattermostConfigPath()): IMConfigGuide {
+  return {
+    plugin: 'mattermost',
+    configPath,
+    example: {
+      mattermost: {
+        url: 'https://your-mattermost-server.example.com',
+        token: 'your-bot-token-here',
+        channelId: 'your-channel-id-here',
+        reconnectIntervalMs: 5000,
+      },
+    },
+  };
+}
+
+export function writeMattermostConfigTemplate(configPath = getDefaultMattermostConfigPath()): void {
+  ensureMattermostConfigDir(configPath);
+  if (fs.existsSync(configPath)) {
+    throw new Error(`Config already exists: ${configPath}`);
+  }
+
+  const guide = getMattermostConfigGuide(configPath);
+  fs.writeFileSync(`${configPath}`, `${JSON.stringify(guide.example, null, 2)}\n`, 'utf-8');
+}
+
 export function loadMattermostConfig(configPath = getDefaultMattermostConfigPath()): MattermostConfig {
   if (!fs.existsSync(configPath)) {
     throw new Error(`Mattermost config file not found: ${configPath}`);
@@ -87,6 +109,24 @@ export async function createConnectedMattermostPlugin(configPath?: string): Prom
   return plugin;
 }
 
+export async function verifyMattermostConnection(configPath?: string): Promise<{
+  ok: true;
+  config: MattermostConfig;
+  botUserId: string;
+}> {
+  const plugin = await createConnectedMattermostPlugin(configPath);
+  try {
+    return {
+      ok: true,
+      config: plugin.getConfig(),
+      botUserId: plugin.getBotUserId(),
+    };
+  } finally {
+    await plugin.disconnect();
+  }
+}
+
+
 /**
  * MattermostPlugin — connects to Mattermost via REST API (posts) and WebSocket (events).
  *
@@ -117,6 +157,12 @@ export class MattermostPlugin implements IMPlugin {
     this._botUserId = me.id;
     this._stopped = false;
     this._startWebSocket();
+
+    // Send welcome message
+    await this.sendMessage(
+      { plugin: 'mattermost', channelId: this._config.channelId, threadId: '' },
+      { kind: 'text', text: `mm-coder bot connected (user: ${me.username})` },
+    );
   }
 
   /** Graceful shutdown: stop WebSocket reconnect loop and close connection */
@@ -130,6 +176,17 @@ export class MattermostPlugin implements IMPlugin {
       this._ws.close();
       this._ws = null;
     }
+  }
+
+  getBotUserId(): string {
+    if (!this._botUserId) {
+      throw new Error('Mattermost plugin is not connected');
+    }
+    return this._botUserId;
+  }
+
+  getConfig(): MattermostConfig {
+    return { ...this._config };
   }
 
   onMessage(handler: (msg: IncomingMessage) => void): void {

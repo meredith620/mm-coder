@@ -1,6 +1,6 @@
-type CLICommand = 'create' | 'attach' | 'import' | 'list' | 'status' | 'remove' | 'start';
+type CLICommand = 'create' | 'attach' | 'import' | 'list' | 'status' | 'remove' | 'start' | 'stop' | 'restart' | 'im-init' | 'im-verify' | 'im-run' | 'tui';
 
-const KNOWN_COMMANDS = new Set<CLICommand>(['create', 'attach', 'import', 'list', 'status', 'remove', 'start']);
+const KNOWN_COMMANDS = new Set<CLICommand>(['create', 'attach', 'import', 'list', 'status', 'remove', 'start', 'stop', 'restart', 'im-init', 'im-verify', 'im-run', 'tui']);
 
 export interface ParsedCLI {
   command: CLICommand;
@@ -9,7 +9,7 @@ export interface ParsedCLI {
 
 /**
  * Parse mm-coder CLI arguments into a structured object.
- * Supports: create, attach, import, list, status, remove, start
+ * Supports: create, attach, import, list, status, remove, start, stop, restart, im-init, im-verify, im-run, tui
  */
 export function parseCLIArgs(argv: string[]): ParsedCLI {
   const [cmd, ...rest] = argv;
@@ -54,6 +54,9 @@ export function parseCLIArgs(argv: string[]): ParsedCLI {
       break;
     case 'remove':
       if (positionals[0]) args['name'] = positionals[0];
+      break;
+    case 'im-run':
+      if (positionals[0]) args['sessionName'] = positionals[0];
       break;
   }
 

@@ -45,6 +45,38 @@ describe('CLI 命令解析', () => {
     expect(parsed.command).toBe('start');
   });
 
+  test('parse "stop" daemon command', () => {
+    const parsed = parseCLIArgs(['stop']);
+    expect(parsed.command).toBe('stop');
+  });
+
+  test('parse "restart" daemon command', () => {
+    const parsed = parseCLIArgs(['restart']);
+    expect(parsed.command).toBe('restart');
+  });
+
+  test('parse "im-init --config /path/to/config.json"', () => {
+    const parsed = parseCLIArgs(['im-init', '--config', '/path/to/config.json']);
+    expect(parsed.command).toBe('im-init');
+    expect(parsed.args.config).toBe('/path/to/config.json');
+  });
+
+  test('parse "im-verify" without config path', () => {
+    const parsed = parseCLIArgs(['im-verify']);
+    expect(parsed.command).toBe('im-verify');
+  });
+
+  test('parse "im-run my-session"', () => {
+    const parsed = parseCLIArgs(['im-run', 'my-session']);
+    expect(parsed.command).toBe('im-run');
+    expect(parsed.args.sessionName).toBe('my-session');
+  });
+
+  test('parse "tui" command', () => {
+    const parsed = parseCLIArgs(['tui']);
+    expect(parsed.command).toBe('tui');
+  });
+
   test('未知命令抛出错误', () => {
     expect(() => parseCLIArgs(['unknown-cmd'])).toThrow();
   });

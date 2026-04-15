@@ -7,9 +7,11 @@ import { fileURLToPath } from 'url';
 import { IPCClient } from './ipc/client.js';
 import { attachSession } from './attach.js';
 import { parseCLIArgs } from './cli-parser.js';
+import { writeMattermostConfigTemplate, verifyMattermostConnection, getDefaultMattermostConfigPath } from './plugins/im/mattermost.js';
 
 const SOCKET_PATH = process.env.MM_CODER_SOCKET ?? path.join(os.tmpdir(), 'mm-coder-daemon.sock');
 const PID_FILE = process.env.MM_CODER_PID_FILE ?? path.join(os.tmpdir(), 'mm-coder-daemon.pid');
+const PERSISTENCE_PATH = process.env.MM_CODER_SESSIONS ?? path.join(os.homedir(), '.mm-coder', 'sessions.json');
 
 async function main() {
   const argv = process.argv.slice(2);
@@ -25,6 +27,12 @@ async function main() {
     switch (parsed.command) {
       case 'start':
         await handleStart();
+        break;
+      case 'stop':
+        await handleStop();
+        break;
+      case 'restart':
+        await handleRestart();
         break;
       case 'create':
         await handleCreate(parsed.args);
@@ -43,6 +51,20 @@ async function main() {
         break;
       case 'import':
         await handleImport(parsed.args);
+        break;
+      case 'im-init':
+        await handleImInit(parsed.args);
+        break;
+      case 'im-verify':
+        await handleImVerify(parsed.args);
+        break;
+      case 'im-run':
+        console.error('im-run: not yet implemented');
+        process.exit(1);
+        break;
+      case 'tui':
+        console.error('tui: not yet implemented');
+        process.exit(1);
         break;
       default:
         console.error(`Unknown command: ${parsed.command}`);
@@ -63,6 +85,8 @@ USAGE:
 
 COMMANDS:
   start                           Start daemon in background
+  stop                            Stop the running daemon
+  restart                         Restart the daemon
   create <name> --workdir <path>  Create a new session
   attach <name>                   Attach to a session
   list                            List all sessions
@@ -70,6 +94,8 @@ COMMANDS:
   remove <name>                   Remove a session
   import <sessionId> --workdir <path> [--name <name>]
                                   Import external session
+  im-init [--config <path>]       Create IM config template
+  im-verify [--config <path>]     Verify IM connectivity
   --help, -h                      Show this help
 
 EXAMPLES:
@@ -79,6 +105,8 @@ EXAMPLES:
   mm-coder list
   mm-coder status bug-fix
   mm-coder remove bug-fix
+  mm-coder im-init
+  mm-coder im-verify
 `.trim());
 }
 
@@ -96,11 +124,15 @@ async function handleStart() {
     }
   }
 
+  // Ensure persistence directory exists
+  fs.mkdirSync(path.dirname(PERSISTENCE_PATH), { recursive: true });
+
   // Fork daemon to background
   const child = spawn(process.execPath, [
     path.join(path.dirname(fileURLToPath(import.meta.url)), 'daemon-main.js'),
     SOCKET_PATH,
     PID_FILE,
+    PERSISTENCE_PATH,
   ], {
     detached: true,
     stdio: 'ignore',
@@ -108,6 +140,30 @@ async function handleStart() {
 
   child.unref();
   console.log(`Daemon started (PID ${child.pid})`);
+}
+
+async function handleStop() {
+  if (!fs.existsSync(PID_FILE)) {
+    console.log('Daemon is not running');
+    return;
+  }
+
+  const pid = parseInt(fs.readFileSync(PID_FILE, 'utf-8').trim(), 10);
+  try {
+    process.kill(pid, 'SIGTERM');
+    console.log(`Daemon stopped (PID ${pid})`);
+  } catch (err) {
+    // Process not found — clean up stale PID file
+    try { fs.unlinkSync(PID_FILE); } catch { /* ignore */ }
+    console.log('Daemon was not running (stale PID file removed)');
+  }
+}
+
+async function handleRestart() {
+  await handleStop();
+  // Brief wait to allow daemon to flush and exit
+  await new Promise(resolve => setTimeout(resolve, 500));
+  await handleStart();
 }
 
 async function handleCreate(args: Record<string, string | undefined>) {
@@ -244,7 +300,36 @@ async function handleImport(args: Record<string, string | undefined>) {
   console.log(`Session imported as '${imported.name}'`);
 }
 
+async function handleImInit(args: Record<string, string | undefined>) {
+  const configPath = args.config ?? getDefaultMattermostConfigPath();
+
+  try {
+    writeMattermostConfigTemplate(configPath);
+    console.log(`Config template written to: ${configPath}`);
+    console.log('');
+    console.log('Next steps:');
+    console.log(`  1. Edit ${configPath}`);
+    console.log('  2. Fill in your Mattermost URL, bot token, and channel ID');
+    console.log('  3. Run: mm-coder im-verify');
+  } catch (err) {
+    throw new Error((err as Error).message);
+  }
+}
+
+async function handleImVerify(args: Record<string, string | undefined>) {
+  const configPath = args.config;
+
+  console.log('Verifying Mattermost connection...');
+  const result = await verifyMattermostConnection(configPath);
+
+  console.log('Connection OK');
+  console.log(`  URL: ${result.config.url}`);
+  console.log(`  Bot user ID: ${result.botUserId}`);
+  console.log(`  Channel ID: ${result.config.channelId}`);
+}
+
 main().catch(err => {
   console.error(`Fatal error: ${err.message}`);
   process.exit(1);
 });
+

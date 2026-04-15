@@ -1,28 +1,41 @@
 import { IPCServer } from './ipc/socket-server.js';
 import { SessionRegistry } from './session-registry.js';
 import { AclManager } from './acl-manager.js';
+import { PersistenceStore } from './persistence.js';
 import type { AclAction, Actor } from './acl-manager.js';
 import type { ErrorCode } from './ipc/codec.js';
 import { randomUUID } from 'crypto';
 import * as fs from 'fs';
 
+export interface DaemonOptions {
+  persistencePath?: string;
+}
+
 export class Daemon {
   private _server: IPCServer;
   registry: SessionRegistry;
   private _acl: AclManager;
+  private _store: PersistenceStore | null;
 
-  constructor(socketPath: string) {
+  constructor(socketPath: string, opts: DaemonOptions = {}) {
     this._server = new IPCServer(socketPath);
-    this.registry = new SessionRegistry();
+    this._store = opts.persistencePath ? new PersistenceStore(opts.persistencePath) : null;
+    this.registry = new SessionRegistry(this._store ?? undefined);
     this._acl = new AclManager();
     this._registerHandlers();
   }
 
   async start(): Promise<void> {
+    if (this._store) {
+      await this._store.load(this.registry);
+    }
     await this._server.listen();
   }
 
   async stop(): Promise<void> {
+    if (this._store) {
+      await this._store.flush();
+    }
     await this._server.close();
   }
 
@@ -85,7 +98,39 @@ export class Daemon {
       return { pid: process.pid, sessions };
     });
 
-    this._server.handle('attach', async (args, actor) => {
+    this._server.handle('markDetached', async (args) => {
+      const name = args['name'] as string;
+      const exitReason = (args['exitReason'] as 'normal' | 'error' | undefined) ?? 'normal';
+
+      const session = this.registry.get(name);
+      if (!session) {
+        const e = new Error(`Session not found: ${name}`) as Error & { code: ErrorCode };
+        e.code = 'SESSION_NOT_FOUND';
+        throw e;
+      }
+
+      // Allow markDetached from 'attached' or 'recovering' (daemon restarted while attached).
+      // Also tolerate sessions stuck in 'attach_pending' when the CLI process itself crashed.
+      const allowedStates = new Set(['attached', 'attach_pending', 'recovering']);
+      if (!allowedStates.has(session.status)) {
+        // Already in a stable state (idle/error/im_processing) — this is a stale call; ignore.
+        return {};
+      }
+
+      this.registry.markDetached(name, exitReason);
+      if (this._store) void this._store.flush();
+
+      // Push session_resume for any waiting attach waiter
+      this._server.pushEventToAttachWaiter(name, {
+        type: 'event',
+        event: 'session_resume',
+        data: { name },
+      });
+
+      return {};
+    });
+
+    this._server.handle('attach', async (args, actor, socket) => {
       const name = args['name'] as string;
       const pid = args['pid'] as number;
       const session = this.registry.get(name);
@@ -113,8 +158,12 @@ export class Daemon {
         this.registry.markAttached(name, pid);
       }
 
+      if (this._store) void this._store.flush();
+
       const updated = this.registry.get(name)!;
       if (updated.status === 'attach_pending') {
+        // Register socket so markDetached can push session_resume event
+        if (socket) this._server.registerAttachWaiter(name, socket);
         return { waitRequired: true, session: this._serializeSession(updated) };
       }
       return { session: this._serializeSession(updated) };

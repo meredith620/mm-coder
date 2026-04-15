@@ -104,12 +104,18 @@ describe('Mattermost config loader', () => {
         status: 200,
         json: async () => ({ id: 'bot-user-1', username: 'bot' }),
         text: async () => '',
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        status: 201,
+        json: async () => ({ id: 'post1' }),
+        text: async () => '',
       });
     vi.stubGlobal('fetch', fetchMock);
 
     const plugin = await createConnectedMattermostPlugin(configPath);
     expect(plugin).toBeInstanceOf(MattermostPlugin);
-    expect(fetchMock).toHaveBeenCalled();
+    expect(fetchMock).toHaveBeenCalledTimes(2); // GET /users/me + POST welcome message
   });
 });
 

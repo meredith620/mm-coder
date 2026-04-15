@@ -133,11 +133,24 @@ export interface ApprovalResult {
 }
 
 export interface PermissionConfig {
+  autoDenyCapabilities: Capability[];
   autoAllowCapabilities: Capability[];
   autoAskCapabilities: Capability[];
-  autoDenyCapabilities: Capability[];
   autoDenyPatterns: string[];
   timeoutSeconds: number;
+}
+
+export interface IMConfigGuide {
+  plugin: 'mattermost';
+  configPath: string;
+  example: {
+    mattermost: {
+      url: string;
+      token: string;
+      channelId: string;
+      reconnectIntervalMs: number;
+    };
+  };
 }
 
 // CLIEvent types (stream-json output from claude -p)
