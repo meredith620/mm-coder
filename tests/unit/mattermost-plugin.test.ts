@@ -1,5 +1,19 @@
 import { describe, test, expect, vi, beforeEach, afterEach } from 'vitest';
-import { MattermostPlugin } from '../../src/plugins/im/mattermost.js';
+import * as fs from 'fs';
+import * as os from 'os';
+import * as path from 'path';
+import {
+  MattermostPlugin,
+  loadMattermostConfig,
+  createConnectedMattermostPlugin,
+} from '../../src/plugins/im/mattermost.js';
+
+type WSStub = {
+  addEventListener: ReturnType<typeof vi.fn>;
+  close: ReturnType<typeof vi.fn>;
+  send: ReturnType<typeof vi.fn>;
+  __emit: (event: string, payload?: unknown) => void;
+};
 
 const BASE_URL = 'https://mm.example.com';
 const TOKEN = 'test-token';
@@ -14,16 +28,176 @@ function makeFetchMock(responseBody: unknown, status = 200) {
   });
 }
 
+describe('Mattermost config loader', () => {
+  let tmpDir: string;
+
+  beforeEach(() => {
+    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'mm-cfg-'));
+  });
+
+  afterEach(() => {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  });
+
+  test('支持顶层配置结构', () => {
+    const configPath = path.join(tmpDir, 'config.json');
+    fs.writeFileSync(configPath, JSON.stringify({
+      url: BASE_URL,
+      token: TOKEN,
+      channelId: CHANNEL_ID,
+      reconnectIntervalMs: 2000,
+    }));
+
+    const cfg = loadMattermostConfig(configPath);
+    expect(cfg.url).toBe(BASE_URL);
+    expect(cfg.token).toBe(TOKEN);
+    expect(cfg.channelId).toBe(CHANNEL_ID);
+    expect(cfg.reconnectIntervalMs).toBe(2000);
+  });
+
+  test('支持 mattermost 分组配置结构', () => {
+    const configPath = path.join(tmpDir, 'config.json');
+    fs.writeFileSync(configPath, JSON.stringify({
+      mattermost: {
+        url: BASE_URL,
+        token: TOKEN,
+        channelId: CHANNEL_ID,
+      },
+    }));
+
+    const cfg = loadMattermostConfig(configPath);
+    expect(cfg.url).toBe(BASE_URL);
+    expect(cfg.token).toBe(TOKEN);
+    expect(cfg.channelId).toBe(CHANNEL_ID);
+  });
+
+  test('缺失必填字段时报错', () => {
+    const configPath = path.join(tmpDir, 'config.json');
+    fs.writeFileSync(configPath, JSON.stringify({ url: BASE_URL, token: TOKEN }));
+
+    expect(() => loadMattermostConfig(configPath)).toThrow(/channelId/);
+  });
+
+  test('reconnectIntervalMs 非法时报错', () => {
+    const configPath = path.join(tmpDir, 'config.json');
+    fs.writeFileSync(configPath, JSON.stringify({
+      url: BASE_URL,
+      token: TOKEN,
+      channelId: CHANNEL_ID,
+      reconnectIntervalMs: -1,
+    }));
+
+    expect(() => loadMattermostConfig(configPath)).toThrow(/reconnectIntervalMs/);
+  });
+
+  test('createConnectedMattermostPlugin 会加载配置并执行 connect', async () => {
+    const configPath = path.join(tmpDir, 'config.json');
+    fs.writeFileSync(configPath, JSON.stringify({
+      url: BASE_URL,
+      token: TOKEN,
+      channelId: CHANNEL_ID,
+    }));
+
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        json: async () => ({ id: 'bot-user-1', username: 'bot' }),
+        text: async () => '',
+      });
+    vi.stubGlobal('fetch', fetchMock);
+
+    const plugin = await createConnectedMattermostPlugin(configPath);
+    expect(plugin).toBeInstanceOf(MattermostPlugin);
+    expect(fetchMock).toHaveBeenCalled();
+  });
+});
+
 describe('MattermostPlugin', () => {
   let fetchSpy: ReturnType<typeof vi.fn>;
+  let wsInstances: WSStub[];
 
   beforeEach(() => {
     fetchSpy = makeFetchMock({ id: 'post1' });
     vi.stubGlobal('fetch', fetchSpy);
+
+    wsInstances = [];
+    const WS = vi.fn().mockImplementation(() => {
+      const listeners = new Map<string, Array<(arg?: unknown) => void>>();
+      const ws: WSStub = {
+        addEventListener: vi.fn((event: string, handler: (arg?: unknown) => void) => {
+          if (!listeners.has(event)) listeners.set(event, []);
+          listeners.get(event)!.push(handler);
+        }),
+        close: vi.fn(() => {
+          for (const h of listeners.get('close') ?? []) h();
+        }),
+        send: vi.fn(),
+        __emit: (event: string, payload?: unknown) => {
+          for (const h of listeners.get(event) ?? []) h(payload);
+        },
+      };
+      wsInstances.push(ws);
+      return ws;
+    });
+    vi.stubGlobal('WebSocket', WS as unknown as typeof WebSocket);
   });
 
   afterEach(() => {
     vi.unstubAllGlobals();
+  });
+
+  test('connect 会校验 token 并启动 websocket 认证', async () => {
+    const plugin = new MattermostPlugin({ url: BASE_URL, token: TOKEN, channelId: CHANNEL_ID });
+
+    fetchSpy = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => ({ id: 'bot-u1', username: 'bot' }),
+      text: async () => '',
+    });
+    vi.stubGlobal('fetch', fetchSpy);
+
+    await plugin.connect();
+
+    expect(fetchSpy).toHaveBeenCalledWith(`${BASE_URL}/api/v4/users/me`, expect.anything());
+    expect(wsInstances).toHaveLength(1);
+    wsInstances[0].__emit('open');
+    expect(wsInstances[0].send).toHaveBeenCalled();
+  });
+
+  test('onMessage 能接收 websocket posted 事件', async () => {
+    const plugin = new MattermostPlugin({ url: BASE_URL, token: TOKEN, channelId: CHANNEL_ID });
+
+    fetchSpy = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => ({ id: 'bot-u1', username: 'bot' }),
+      text: async () => '',
+    });
+    vi.stubGlobal('fetch', fetchSpy);
+
+    const received: string[] = [];
+    plugin.onMessage((msg) => received.push(msg.text));
+    await plugin.connect();
+
+    const post = {
+      id: 'post-1',
+      user_id: 'user-x',
+      channel_id: CHANNEL_ID,
+      root_id: '',
+      message: 'hello from ws',
+      create_at: Date.now(),
+    };
+
+    wsInstances[0].__emit('message', {
+      data: JSON.stringify({
+        event: 'posted',
+        data: { post: JSON.stringify(post) },
+      }),
+    });
+
+    expect(received).toEqual(['hello from ws']);
   });
 
   test('sendMessage 调用正确 API endpoint', async () => {
@@ -78,6 +252,38 @@ describe('MattermostPlugin', () => {
     expect(url).toBe(`${BASE_URL}/api/v4/posts`);
     const body = JSON.parse(opts.body);
     expect(body.props?.attachments).toBeDefined();
+  });
+
+  test('connect 遇到无效 token 会抛错', async () => {
+    const plugin = new MattermostPlugin({ url: BASE_URL, token: TOKEN, channelId: CHANNEL_ID });
+
+    fetchSpy = vi.fn().mockResolvedValue({
+      ok: false,
+      status: 401,
+      json: async () => ({ message: 'unauthorized' }),
+      text: async () => 'unauthorized',
+    });
+    vi.stubGlobal('fetch', fetchSpy);
+
+    await expect(plugin.connect()).rejects.toThrow(/401/);
+  });
+
+  test('disconnect 会关闭 websocket', async () => {
+    const plugin = new MattermostPlugin({ url: BASE_URL, token: TOKEN, channelId: CHANNEL_ID });
+
+    fetchSpy = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => ({ id: 'bot-u1', username: 'bot' }),
+      text: async () => '',
+    });
+    vi.stubGlobal('fetch', fetchSpy);
+
+    await plugin.connect();
+    expect(wsInstances).toHaveLength(1);
+
+    await plugin.disconnect();
+    expect(wsInstances[0].close).toHaveBeenCalled();
   });
 
   test('Authorization header 包含 token', async () => {

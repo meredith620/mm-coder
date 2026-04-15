@@ -111,6 +111,8 @@ $ mm-coder attach bug-fix                       # 再次启动 Claude Code，自
     → daemon 停止 IM worker 进程（SIGTERM，等待优雅退出）
     → 直接执行 claude --resume <id>（stdio: inherit）
     → 用户与 Claude Code 原生交互
+    → 用户输入 `/exit` 或按 `Ctrl+C` 结束 attach
+    → attach 进程总是上报 detach（`markDetached`），daemon 立即释放会话互斥锁
     → Claude Code 退出后，通知 daemon（exit reason: normal 或 taken_over）
     → daemon 立即 pre-warm 新的 IM worker（spawn claude -p --input-format stream-json --resume <id> --permission-prompt-tool "node /tmp/mm-coder-mcp-bridge-<id>.js"）
     → session 变为 idle，等待 IM 消息投递
@@ -164,15 +166,22 @@ Thread（每个 session 一个） → 会话交互
 - **不同 session 之间完全并行** — 多个 thread 可同时与各自的 session 交互
 - 终端和 IM 互斥：attach 时 IM 可选择接管（SIGTERM 终止终端进程）或排队等待
 
-### 2.6 恢复原则
+### 2.7 Mattermost 配置加载与连接验证
 
-- daemon 重启后采用**保守恢复**：优先恢复 session 元数据，不自动重放不确定操作
-- 无法确认的运行态进入 `recovering`，等待显式恢复或重新 attach
-- 未决审批默认 fail-closed，不在后台无限等待
-- `attached` / `im_processing` 等运行态恢复时必须结合 PID/进程存活校验纠偏
-- **SIGTERM 接管**：daemon 向终端 Claude Code 发 SIGTERM 后进程干净退出（exit 143），session 完整可 resume；resume 后模型重新规划，不保留中断前 partial 状态知识，无数据损坏风险
+- 配置文件默认路径：`~/.mm-coder/config.json`
+- 支持两种 JSON 结构（二选一）：
+  - 顶层直配：`{ "url": "...", "token": "...", "channelId": "..." }`
+  - 命名分组：`{ "mattermost": { "url": "...", "token": "...", "channelId": "..." } }`
+- 必填字段：`url` / `token` / `channelId`，缺失或空字符串立即报错并拒绝启动插件
+- 可选字段：`reconnectIntervalMs`（>0，默认 5000ms）
+- 连接验证闭环：
+  - `connect()` 首先调用 `GET /api/v4/users/me` 校验 token
+  - 校验通过后启动 `wss://.../api/v4/websocket`
+  - WebSocket `open` 后发送 `authentication_challenge`
+  - 仅处理 `posted` 事件，且要求 `channel_id === config.channelId`
+  - 忽略 bot 自己发送的消息（`post.user_id === botUserId`）
+- 失败语义：任一 REST 调用非 2xx 立即抛错（携带 status + body），调用方可直接感知不可用配置
 
----
 
 ## 3. 核心模块
 
@@ -646,31 +655,38 @@ interface PermissionConfig {
 
 ```typescript
 interface IMPlugin {
-  name: string;
-
-  init(config: Record<string, unknown>): Promise<void>;
-  start(): Promise<void>;
-  stop(): Promise<void>;
-
   onMessage(handler: (msg: IncomingMessage) => void): void;
   sendMessage(target: MessageTarget, content: MessageContent): Promise<void>;
-  updateMessage(target: MessageTarget, messageId: string, content: MessageContent): Promise<void>;
-
-  // 为流式输出创建可增量更新的消息句柄（用于 token/event 防抖合并）
-  createLiveMessage(target: MessageTarget): Promise<{ messageId: string }>;
-
-  // 为新 session 创建独立 thread，返回 threadId
-  createThread(channelId: string, sessionName: string): Promise<string>;
-
-  // 权限审批
-  requestApproval(target: MessageTarget, req: ApprovalRequest): Promise<ApprovalResult>;
+  createLiveMessage(target: MessageTarget, content: MessageContent): Promise<string>;
+  updateMessage(messageId: string, content: MessageContent): Promise<void>;
+  requestApproval(target: MessageTarget, req: ApprovalRequest): Promise<void>;
 }
 ```
 
 - `updateMessage` 用于流式增量更新，建议默认防抖窗口 500ms（插件可配置）
-- `createLiveMessage` 在首个 assistant 事件前创建占位消息，后续统一走同一 messageId 更新，避免 IM 刷屏
+- `createLiveMessage` 返回 live messageId，后续 `updateMessage(messageId, ...)` 复用同一消息
 
-#### 4.1.1 IM 交互回调契约
+#### 4.1.1 StdioIMPlugin 设计与测试策略
+
+定位：用于端到端测试与本地调试，不依赖真实 Mattermost/Slack。
+
+协议约定（JSONL）：
+
+- stdin 入站（IM -> daemon）
+  - `{ "type": "message", "messageId": "...", "threadId": "...", "userId": "...", "text": "...", "dedupeKey": "..." }`
+- stdout 出站（daemon -> IM）
+  - `send`：普通消息
+  - `live`：创建流式占位消息
+  - `update`：更新同一条 live 消息
+  - `approval`：审批请求
+
+测试策略：
+- 用 `Readable/Writable` mock stdin/stdout，不依赖终端真实 fd
+- 覆盖单条消息链路：stdin → Dispatcher → mock claude → stdout
+- 覆盖多消息串行处理：验证按 session 队列顺序输出多条 `live`
+- 覆盖审批事件序列化：`requestApproval` 正确输出 `approval` JSON
+- 覆盖容错：坏 JSON / 空行 / 未知 type 仅忽略，不崩溃
+
 
 Daemon 通过 `IMPlugin.sendMessage` / `updateMessage` 向用户推送需要交互的事件，回调由用户通过 `IncomingMessage` 入口触发。
 
@@ -790,7 +806,7 @@ class ClaudeCodePlugin implements CLIPlugin {
 }
 ```
 
-### 4.3 插件加载
+### 4.3 插件加载与扩展指南
 
 插件以 npm 包或本地目录形式存在，配置文件声明，动态 import 加载：
 
@@ -803,6 +819,23 @@ plugins:
     - name: claude-code
       package: "@mm-coder/plugin-claude-code"
 ```
+
+新增 IM 插件（示例：Discord）：
+1. 新建 `src/plugins/im/discord.ts`，实现 `IMPlugin` 五个核心方法。
+2. 在 `onMessage` 中把 Discord 入站消息映射为统一 `IncomingMessage`。
+3. 在 `sendMessage/createLiveMessage/updateMessage/requestApproval` 中实现 Discord API 调用。
+4. 按 thread/channel 语义实现 `threadId` 映射，保证 `SessionRegistry.getByIMThread()` 可路由。
+5. 补齐单测（协议映射）+ 集成测试（消息链路、审批、错误重试）。
+
+新增 CLI 插件（示例：Gemini CLI）：
+1. 新建 `src/plugins/cli/gemini.ts`，实现 `CLIPlugin`：
+   - `buildAttachCommand`
+   - `buildIMWorkerCommand`
+   - `generateSessionId`
+2. 输出流必须兼容 `parseStream` 产出的统一 `CLIEvent`，至少覆盖 `assistant/result/system`。
+3. 权限拦截优先复用 Gemini 原生 Policy Engine，而不是绕过到外层字符串匹配。
+4. 保证 `--resume <sessionId>` 语义稳定，sessionId 由插件生成并持久化。
+5. 补齐插件单测（命令构建、流解析）与跨插件回归（attach/IM/approval）。
 
 ---
 

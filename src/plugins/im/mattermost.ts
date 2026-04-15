@@ -1,3 +1,6 @@
+import * as fs from 'fs';
+import * as os from 'os';
+import * as path from 'path';
 import type { IMPlugin } from '../types.js';
 import type { MessageTarget, MessageContent, IncomingMessage, ApprovalRequest } from '../../types.js';
 
@@ -5,14 +8,128 @@ export interface MattermostConfig {
   url: string;
   token: string;
   channelId: string;
+  /** Bot user ID, resolved during connect() */
+  botUserId?: string;
+  /** WebSocket reconnect interval in ms (default: 5000) */
+  reconnectIntervalMs?: number;
 }
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null;
+}
+
+function requireNonEmptyString(value: unknown, fieldName: string, configPath: string): string {
+  if (typeof value !== 'string' || value.trim() === '') {
+    throw new Error(`Mattermost config field '${fieldName}' is required in ${configPath}`);
+  }
+  return value;
+}
+
+/** Default config path: ~/.mm-coder/config.json */
+export function getDefaultMattermostConfigPath(): string {
+  return path.join(os.homedir(), '.mm-coder', 'config.json');
+}
+
+/**
+ * Load Mattermost config from ~/.mm-coder/config.json.
+ *
+ * Supported JSON shapes:
+ *   1) { "url": "...", "token": "...", "channelId": "..." }
+ *   2) { "mattermost": { "url": "...", "token": "...", "channelId": "..." } }
+ */
+export function loadMattermostConfig(configPath = getDefaultMattermostConfigPath()): MattermostConfig {
+  if (!fs.existsSync(configPath)) {
+    throw new Error(`Mattermost config file not found: ${configPath}`);
+  }
+
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(fs.readFileSync(configPath, 'utf-8')) as unknown;
+  } catch (err) {
+    throw new Error(`Failed to parse Mattermost config: ${(err as Error).message}`);
+  }
+
+  if (!isRecord(parsed)) {
+    throw new Error(`Invalid Mattermost config format in ${configPath}`);
+  }
+
+  const raw = isRecord(parsed['mattermost'])
+    ? parsed['mattermost']
+    : parsed;
+
+  const url = requireNonEmptyString(raw['url'], 'url', configPath);
+  const token = requireNonEmptyString(raw['token'], 'token', configPath);
+  const channelId = requireNonEmptyString(raw['channelId'], 'channelId', configPath);
+
+  const reconnectRaw = raw['reconnectIntervalMs'];
+  let reconnectIntervalMs: number | undefined;
+  if (reconnectRaw !== undefined) {
+    if (typeof reconnectRaw !== 'number' || !Number.isFinite(reconnectRaw) || reconnectRaw <= 0) {
+      throw new Error(`Mattermost config field 'reconnectIntervalMs' must be a positive number in ${configPath}`);
+    }
+    reconnectIntervalMs = reconnectRaw;
+  }
+
+  return {
+    url,
+    token,
+    channelId,
+    ...(reconnectIntervalMs !== undefined ? { reconnectIntervalMs } : {}),
+  };
+}
+
+/**
+ * Convenience helper: load config file, create plugin, connect and validate token.
+ */
+export async function createConnectedMattermostPlugin(configPath?: string): Promise<MattermostPlugin> {
+  const plugin = new MattermostPlugin(loadMattermostConfig(configPath));
+  await plugin.connect();
+  return plugin;
+}
+
+/**
+ * MattermostPlugin — connects to Mattermost via REST API (posts) and WebSocket (events).
+ *
+ * Lifecycle:
+ *   1. new MattermostPlugin(config)
+ *   2. await plugin.connect()  ← validates token, resolves botUserId, starts WebSocket
+ *   3. plugin.onMessage(handler) to receive incoming messages
+ *   4. await plugin.disconnect() on shutdown
+ */
 export class MattermostPlugin implements IMPlugin {
   private _config: MattermostConfig;
   private _handlers: Array<(msg: IncomingMessage) => void> = [];
+  private _ws: WebSocket | null = null;
+  private _botUserId: string | null = null;
+  private _reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+  private _stopped = false;
 
   constructor(config: MattermostConfig) {
     this._config = config;
+  }
+
+  /**
+   * Validate token by fetching /api/v4/users/me, then start WebSocket listener.
+   * Throws if token is invalid or server unreachable.
+   */
+  async connect(): Promise<void> {
+    const me = await this._apiGet<{ id: string; username: string }>('/api/v4/users/me');
+    this._botUserId = me.id;
+    this._stopped = false;
+    this._startWebSocket();
+  }
+
+  /** Graceful shutdown: stop WebSocket reconnect loop and close connection */
+  async disconnect(): Promise<void> {
+    this._stopped = true;
+    if (this._reconnectTimer) {
+      clearTimeout(this._reconnectTimer);
+      this._reconnectTimer = null;
+    }
+    if (this._ws) {
+      this._ws.close();
+      this._ws = null;
+    }
   }
 
   onMessage(handler: (msg: IncomingMessage) => void): void {
@@ -32,10 +149,110 @@ export class MattermostPlugin implements IMPlugin {
     return content.url;
   }
 
-  async sendMessage(target: MessageTarget, content: MessageContent): Promise<void> {
-    await fetch(`${this._config.url}/api/v4/posts`, {
-      method: 'POST',
+  private async _apiRequest(path: string, init: { method: 'GET' | 'POST' | 'PUT'; body?: string }): Promise<Response> {
+    const res = await fetch(`${this._config.url}${path}`, {
+      method: init.method,
       headers: this._headers(),
+      ...(init.body ? { body: init.body } : {}),
+    });
+
+    if (!res.ok) {
+      const body = await res.text().catch(() => '');
+      throw new Error(`Mattermost API error ${res.status}: ${body}`);
+    }
+
+    return res;
+  }
+
+  private async _apiGet<T>(path: string): Promise<T> {
+    const res = await this._apiRequest(path, { method: 'GET' });
+    return res.json() as Promise<T>;
+  }
+
+  /** Start WebSocket connection to receive real-time events */
+  private _startWebSocket(): void {
+    if (this._stopped) return;
+
+    const wsUrl = this._config.url.replace(/^https?:\/\//, (m) =>
+      m.startsWith('https') ? 'wss://' : 'ws://',
+    ) + '/api/v4/websocket';
+
+    const ws = new WebSocket(wsUrl);
+    this._ws = ws;
+
+    ws.addEventListener('open', () => {
+      // Authenticate the WebSocket connection
+      ws.send(JSON.stringify({
+        seq: 1,
+        action: 'authentication_challenge',
+        data: { token: this._config.token },
+      }));
+    });
+
+    ws.addEventListener('message', (event) => {
+      this._handleWsMessage(event.data as string);
+    });
+
+    ws.addEventListener('close', () => {
+      this._ws = null;
+      if (!this._stopped) {
+        const interval = this._config.reconnectIntervalMs ?? 5000;
+        this._reconnectTimer = setTimeout(() => {
+          this._reconnectTimer = null;
+          this._startWebSocket();
+        }, interval);
+      }
+    });
+
+    ws.addEventListener('error', () => {
+      // Errors are followed by close event, handled there
+    });
+  }
+
+  private _handleWsMessage(raw: string): void {
+    let event: Record<string, unknown>;
+    try {
+      event = JSON.parse(raw) as Record<string, unknown>;
+    } catch {
+      return;
+    }
+
+    if (event.event !== 'posted') return;
+
+    const data = event.data as Record<string, unknown> | undefined;
+    if (!data) return;
+
+    let post: Record<string, unknown>;
+    try {
+      post = JSON.parse(data.post as string) as Record<string, unknown>;
+    } catch {
+      return;
+    }
+
+    // Ignore messages from the bot itself
+    if (post.user_id === this._botUserId) return;
+
+    // Only handle messages in the configured channel or threads in it
+    const channelId = post.channel_id as string | undefined;
+    if (channelId !== this._config.channelId) return;
+
+    const incoming: IncomingMessage = {
+      messageId: post.id as string,
+      plugin: 'mattermost',
+      channelId: channelId,
+      threadId: (post.root_id as string | undefined) || (post.id as string),
+      userId: post.user_id as string,
+      text: post.message as string,
+      createdAt: new Date(Number(post.create_at)).toISOString(),
+      dedupeKey: post.id as string,
+    };
+
+    for (const h of this._handlers) h(incoming);
+  }
+
+  async sendMessage(target: MessageTarget, content: MessageContent): Promise<void> {
+    await this._apiRequest('/api/v4/posts', {
+      method: 'POST',
       body: JSON.stringify({
         channel_id: this._config.channelId,
         root_id: target.threadId,
@@ -45,9 +262,8 @@ export class MattermostPlugin implements IMPlugin {
   }
 
   async createLiveMessage(target: MessageTarget, content: MessageContent): Promise<string> {
-    const res = await fetch(`${this._config.url}/api/v4/posts`, {
+    const res = await this._apiRequest('/api/v4/posts', {
       method: 'POST',
-      headers: this._headers(),
       body: JSON.stringify({
         channel_id: this._config.channelId,
         root_id: target.threadId,
@@ -59,9 +275,8 @@ export class MattermostPlugin implements IMPlugin {
   }
 
   async updateMessage(messageId: string, content: MessageContent): Promise<void> {
-    await fetch(`${this._config.url}/api/v4/posts/${messageId}`, {
+    await this._apiRequest(`/api/v4/posts/${messageId}`, {
       method: 'PUT',
-      headers: this._headers(),
       body: JSON.stringify({
         id: messageId,
         message: this._toText(content),
@@ -83,9 +298,8 @@ export class MattermostPlugin implements IMPlugin {
       style: 'danger',
     });
 
-    await fetch(`${this._config.url}/api/v4/posts`, {
+    await this._apiRequest('/api/v4/posts', {
       method: 'POST',
-      headers: this._headers(),
       body: JSON.stringify({
         channel_id: this._config.channelId,
         root_id: target.threadId,

@@ -33,6 +33,39 @@ mm-coder attach bug-fix                     # 直接进入 Claude Code
 mm-coder attach bug-fix                     # 再次进入，自动 resume
 ```
 
+## 配置
+
+### Mattermost
+
+创建 `~/.mm-coder/config.json`：
+
+```json
+{
+  "url": "https://mattermost.example.com",
+  "token": "your-bot-token",
+  "channelId": "channel-id"
+}
+```
+
+| 字段 | 说明 |
+|------|------|
+| `url` | Mattermost 服务器地址 |
+| `token` | Bot 的 Personal Access Token |
+| `channelId` | 监听消息的频道 ID |
+| `reconnectIntervalMs` | WebSocket 重连间隔（可选，默认 5000ms） |
+
+也可使用命名分组格式：
+
+```json
+{
+  "mattermost": {
+    "url": "https://mattermost.example.com",
+    "token": "your-bot-token",
+    "channelId": "channel-id"
+  }
+}
+```
+
 ## 架构
 
 Session-based 混合方案：
