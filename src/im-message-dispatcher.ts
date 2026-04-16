@@ -1,7 +1,7 @@
 import { spawn } from 'child_process';
 import * as readline from 'readline';
 import type { SessionRegistry } from './session-registry.js';
-import type { IMPlugin } from './plugins/types.js';
+import type { IMPlugin, CLIPlugin } from './plugins/types.js';
 import type { MessageTarget, QueuedMessage, Session } from './types.js';
 import { StreamToIM } from './stream-to-im.js';
 
@@ -9,8 +9,7 @@ export interface IMMessageDispatcherOptions {
   registry: SessionRegistry;
   imPlugin: IMPlugin;
   imTarget: MessageTarget;
-  cliCommand: string;
-  cliArgs: string[];
+  cliPlugin: CLIPlugin;
   pollIntervalMs?: number;
   maxRetries?: number;
   onSessionImDone?: (sessionName: string) => void;
@@ -83,13 +82,8 @@ export class IMMessageDispatcher {
     };
   }
 
-  private _buildClaudeArgs(session: Session, message: QueuedMessage): string[] {
-    return [
-      '-p',
-      message.content,
-      '--resume', session.sessionId,
-      '--output-format', 'stream-json',
-    ];
+  private _buildCLICommand(session: Session, message: QueuedMessage) {
+    return this._opts.cliPlugin.buildIMMessageCommand(session, message.content);
   }
 
   private async _processMessage(sessionName: string, messageId: string, attempt = 0): Promise<void> {
@@ -110,7 +104,8 @@ export class IMMessageDispatcher {
       while (currentAttempt <= maxRetries) {
         try {
           const exitCode = await new Promise<number>((resolve) => {
-            const proc = spawn(this._opts.cliCommand, this._buildClaudeArgs(session, message), {
+            const cmdSpec = this._buildCLICommand(session, message);
+            const proc = spawn(cmdSpec.command, cmdSpec.args, {
               stdio: ['pipe', 'pipe', 'pipe'],
               cwd: session.workdir,
             });
