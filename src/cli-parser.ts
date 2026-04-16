@@ -1,24 +1,46 @@
-type CLICommand = 'create' | 'attach' | 'import' | 'list' | 'status' | 'remove' | 'start' | 'stop' | 'restart' | 'im-init' | 'im-verify' | 'im-run' | 'tui';
+type CLICommand = 'create' | 'attach' | 'import' | 'list' | 'status' | 'remove' | 'start' | 'stop' | 'restart' | 'im' | 'im-init' | 'im-verify' | 'im-run' | 'tui';
+type IMSubcommand = 'init' | 'verify' | 'run';
 
-const KNOWN_COMMANDS = new Set<CLICommand>(['create', 'attach', 'import', 'list', 'status', 'remove', 'start', 'stop', 'restart', 'im-init', 'im-verify', 'im-run', 'tui']);
+const KNOWN_COMMANDS = new Set<CLICommand>(['create', 'attach', 'import', 'list', 'status', 'remove', 'start', 'stop', 'restart', 'im', 'im-init', 'im-verify', 'im-run', 'tui']);
+const IM_SUBCOMMANDS = new Set<IMSubcommand>(['init', 'verify', 'run']);
 
 export interface ParsedCLI {
   command: CLICommand;
+  subcommand?: IMSubcommand;
   args: Record<string, string | undefined>;
 }
 
 /**
  * Parse mm-coder CLI arguments into a structured object.
- * Supports: create, attach, import, list, status, remove, start, stop, restart, im-init, im-verify, im-run, tui
+ * Supports: create, attach, import, list, status, remove, start, stop, restart, im <init|verify|run>, tui
+ * Backward compatible: im-init → im init, im-verify → im verify, im-run → im run
  */
 export function parseCLIArgs(argv: string[]): ParsedCLI {
   const [cmd, ...rest] = argv;
 
   if (!cmd || !KNOWN_COMMANDS.has(cmd as CLICommand)) {
-    throw new Error(`Unknown command: ${cmd ?? '(none)'}. Valid commands: ${[...KNOWN_COMMANDS].join(', ')}`);
+    throw new Error(`Unknown command: ${cmd ?? '(none)'}. Valid commands: ${[...KNOWN_COMMANDS].filter(c => !c.startsWith('im-')).join(', ')}`);
   }
 
-  const command = cmd as CLICommand;
+  let command = cmd as CLICommand;
+  let subcommand: IMSubcommand | undefined;
+  let argsRest = rest;
+
+  // Handle `im <subcommand>` style
+  if (command === 'im') {
+    const sub = rest[0];
+    if (!sub || !IM_SUBCOMMANDS.has(sub as IMSubcommand)) {
+      throw new Error(`Unknown im subcommand: ${sub ?? '(none)'}. Valid: ${[...IM_SUBCOMMANDS].join(', ')}`);
+    }
+    subcommand = sub as IMSubcommand;
+    argsRest = rest.slice(1);
+  }
+
+  // Backward compat: im-init → im init, im-verify → im verify, im-run → im run
+  if (command === 'im-init') { command = 'im'; subcommand = 'init'; }
+  if (command === 'im-verify') { command = 'im'; subcommand = 'verify'; }
+  if (command === 'im-run') { command = 'im'; subcommand = 'run'; }
+
   const args: Record<string, string | undefined> = {};
 
   // Parse named flags (--key value or -k value)
@@ -30,18 +52,18 @@ export function parseCLIArgs(argv: string[]): ParsedCLI {
     'w': 'workdir',
   };
 
-  while (i < rest.length) {
-    const cur = rest[i];
+  while (i < argsRest.length) {
+    const cur = argsRest[i];
     if (cur === undefined) break;
     if (cur.startsWith('--')) {
       const key = cur.slice(2);
-      args[key] = rest[i + 1];
+      args[key] = argsRest[i + 1];
       i += 2;
     } else if (cur.startsWith('-') && cur.length === 2) {
       const shortKey = cur.slice(1);
       const longKey = SHORT_FLAGS[shortKey];
       if (longKey) {
-        args[longKey] = rest[i + 1];
+        args[longKey] = argsRest[i + 1];
         i += 2;
       } else {
         positionals.push(cur);
@@ -70,10 +92,10 @@ export function parseCLIArgs(argv: string[]): ParsedCLI {
     case 'remove':
       if (positionals[0]) args['name'] = positionals[0];
       break;
-    case 'im-run':
-      if (positionals[0]) args['sessionName'] = positionals[0];
+    case 'im':
+      if (subcommand === 'run' && positionals[0]) args['sessionName'] = positionals[0];
       break;
   }
 
-  return { command, args };
+  return { command, ...(subcommand ? { subcommand } : {}), args };
 }
