@@ -81,13 +81,13 @@ COMMANDS:
   start                           Start daemon in background
   stop                            Stop the running daemon
   restart                         Restart the daemon
-  create <name> [-w|--workdir <path>] [-C|--cli <name>]
+  create <name> [-n|--name <name>] [-w|--workdir <path>] [-C|--cli <name>]
                                   Create a new session
-  attach <name>                   Attach to a session
+  attach <name> [-n|--name <name>]  Attach to a session
   list                            List all sessions
-  status [name]                    Show daemon/session status
-  remove <name>                    Remove a session
-  import <sessionId> -w <path> [-n|--name <name>]
+  status [name] [-n|--name <name>]  Show daemon/session status
+  remove <name> [-n|--name <name>]  Remove a session
+  import <sessionId> [-s|--sessionId <id>] -w <path> [-n|--name <name>] [-C|--cli <name>]
                                   Import external session
   im init [-p|--plugin <name>] [-c|--config <path>]
                                   Create IM config template
@@ -99,10 +99,10 @@ COMMANDS:
 EXAMPLES:
   mm-coder start
   mm-coder create bug-fix -w ~/myapp
-  mm-coder attach bug-fix
+  mm-coder attach bug-fix -n my-session
   mm-coder list
-  mm-coder status bug-fix
-  mm-coder remove bug-fix
+  mm-coder status bug-fix -n my-session
+  mm-coder remove bug-fix -n my-session
   mm-coder im init -p discord
   mm-coder im verify
   mm-coder im init -c ~/.mm-coder/discord.json
