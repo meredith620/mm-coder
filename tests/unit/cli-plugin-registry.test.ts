@@ -1,0 +1,26 @@
+import { describe, test, expect } from 'vitest';
+import { getCLIPlugin, listCLIPlugins } from '../../src/plugins/cli/registry.js';
+import { ClaudeCodePlugin } from '../../src/plugins/cli/claude-code.js';
+
+describe('CLI Plugin Registry', () => {
+  test('getCLIPlugin 返回 claude-code 插件实例', () => {
+    const plugin = getCLIPlugin('claude-code');
+    expect(plugin).toBeInstanceOf(ClaudeCodePlugin);
+  });
+
+  test('getCLIPlugin 对未知插件抛错', () => {
+    expect(() => getCLIPlugin('unknown-plugin')).toThrow(/Unknown CLI plugin: unknown-plugin/);
+  });
+
+  test('listCLIPlugins 返回已注册插件列表', () => {
+    const plugins = listCLIPlugins();
+    expect(plugins).toContain('claude-code');
+    expect(plugins.length).toBeGreaterThan(0);
+  });
+
+  test('getCLIPlugin 每次调用返回新实例', () => {
+    const plugin1 = getCLIPlugin('claude-code');
+    const plugin2 = getCLIPlugin('claude-code');
+    expect(plugin1).not.toBe(plugin2);
+  });
+});

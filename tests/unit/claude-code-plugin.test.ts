@@ -50,4 +50,15 @@ describe('ClaudeCodePlugin', () => {
     const id = plugin.generateSessionId();
     expect(id).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/);
   });
+
+  test('buildIMMessageCommand 生成带 prompt 的命令', () => {
+    const { command, args } = plugin.buildIMMessageCommand(session, 'hello world');
+    expect(command).toBe('claude');
+    expect(args).toContain('-p');
+    expect(args).toContain('hello world');
+    expect(args).toContain('--resume');
+    expect(args).toContain('uuid-123');
+    expect(args).toContain('--output-format');
+    expect(args).toContain('stream-json');
+  });
 });

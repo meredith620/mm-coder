@@ -8,6 +8,7 @@ export interface CommandSpec {
 export interface CLIPlugin {
   buildAttachCommand(session: Session): CommandSpec;
   buildIMWorkerCommand(session: Session, bridgeScriptPath: string): CommandSpec;
+  buildIMMessageCommand(session: Session, prompt: string): CommandSpec;
   generateSessionId(): string;
 }
 

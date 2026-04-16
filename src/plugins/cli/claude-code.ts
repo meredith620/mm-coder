@@ -26,6 +26,17 @@ export class ClaudeCodePlugin implements CLIPlugin {
     };
   }
 
+  buildIMMessageCommand(session: Session, prompt: string): CommandSpec {
+    return {
+      command: 'claude',
+      args: [
+        '-p', prompt,
+        '--resume', session.sessionId,
+        '--output-format', 'stream-json',
+      ],
+    };
+  }
+
   generateSessionId(): string {
     return randomUUID();
   }
