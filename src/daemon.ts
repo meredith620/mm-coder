@@ -119,7 +119,17 @@ export class Daemon {
       return;
     }
 
-    // Prevent creating a session for top-level channel messages that look like unknown commands
+    // C 类：IM 中不支持的命令（remove/attach/create 等）
+    // 在 thread 中（isTopLevel=false）拦截，不落入 CLI
+    if (!msg.isTopLevel && trimmed.startsWith('/')) {
+      await this._imPlugin.sendMessage(this._buildReplyTarget(msg, channelId), {
+        kind: 'text',
+        text: `命令 \`${trimmed.split(' ')[0]}\` 不支持在 IM 中使用，请使用 mm-coder CLI。`,
+      });
+      return;
+    }
+
+    // D 类：顶层 channel 消息中的未知命令
     if (msg.isTopLevel && trimmed.startsWith('/')) {
       await this._imPlugin.sendMessage(this._buildReplyTarget(msg, channelId), {
         kind: 'text',
@@ -128,6 +138,7 @@ export class Daemon {
       return;
     }
 
+    // E 类：普通文本消息，进入 Claude 处理流程
     const session = this._getOrCreateSessionForThread(msg.threadId, msg.plugin);
     try {
       this.registry.enqueueIMMessage(session.name, {

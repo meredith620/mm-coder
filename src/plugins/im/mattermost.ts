@@ -110,14 +110,15 @@ export function loadMattermostConfig(configPath = getDefaultMattermostConfigPath
 
 export function getMattermostCommandHelpText(): string {
   return [
-    '**mm-coder 可用命令**（直接发送普通消息）：',
+    '**mm-coder 可用命令**：',
     '',
     '`/help` — 显示本帮助',
     '`/list` — 列出所有 mm-coder session 及绑定 thread',
-    '`/open <sessionName>` — 在 session 对应的 thread 中发送定位消息',
     '`/status` — 显示当前 session 状态（在 thread 中）或全局统计（在主频道）',
+    '`/open <sessionName>` — 在 session 对应的 thread 中发送定位消息',
     '',
-    '其他文本消息将发送给当前 thread 对应的 Claude 会话处理。',
+    '在 thread 中发送普通文本消息将交给 Claude 处理。',
+    '`/remove`、`/attach`、`/create` 等 session 管理命令请在 CLI 中使用。',
   ].join('\n');
 }
 

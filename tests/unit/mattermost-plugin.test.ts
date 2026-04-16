@@ -41,12 +41,14 @@ describe('Mattermost config loader', () => {
     fs.rmSync(tmpDir, { recursive: true, force: true });
   });
 
-  test('帮助文案包含常用普通消息命令', () => {
+  test('帮助文案包含所有 IM 命令', () => {
     const text = getMattermostCommandHelpText();
     expect(text).toContain('/help');
     expect(text).toContain('/list');
+    expect(text).toContain('/status');
     expect(text).toContain('/open <sessionName>');
-    expect(text).toContain('普通消息');
+    expect(text).toContain('普通文本消息');
+    expect(text).toContain('请在 CLI 中使用');
   });
 
   test('欢迎文案包含 bot 名称和帮助信息', () => {
