@@ -289,13 +289,42 @@ export class Daemon {
       });
     } else {
       // 无绑定：为 session 创建新 thread（发 root post），绑定后回复
-      const newThreadId = await this._imPlugin.createLiveMessage(
-        { plugin: 'mattermost', channelId, threadId: '' },
-        { kind: 'text', text: `[${sessionName} thread — 请在此继续对话]` },
-      );
+      // double-check：await 让出事件循环后可能已被其他请求绑定
+      const recheckBinding = session.imBindings.find((item) => item.plugin === msg.plugin);
+      if (recheckBinding) {
+        await this._imPlugin.sendMessage(this._buildReplyTarget(msg, channelId), {
+          kind: 'text',
+          text: `会话 ${sessionName} 已被绑定到其他 thread。`,
+        });
+        return;
+      }
+
+      let newThreadId: string;
+      try {
+        newThreadId = await this._imPlugin.createLiveMessage(
+          { plugin: 'mattermost', channelId, threadId: '' },
+          { kind: 'text', text: `[${sessionName} thread — 请在此继续对话]` },
+        );
+      } catch (err) {
+        await this._imPlugin.sendMessage(this._buildReplyTarget(msg, channelId), {
+          kind: 'text',
+          text: `为 ${sessionName} 创建 thread 失败：${(err as Error).message}`,
+        });
+        return;
+      }
+
+      // 再次检查：createLiveMessage 期间可能已被并发绑定
+      const finalCheck = session.imBindings.find((item) => item.plugin === msg.plugin);
+      if (finalCheck) {
+        await this._imPlugin.sendMessage(this._buildReplyTarget(msg, channelId), {
+          kind: 'text',
+          text: `会话 ${sessionName} 已被绑定到其他 thread。`,
+        });
+        return;
+      }
 
       this.registry.bindIM(sessionName, {
-        plugin: 'mattermost',
+        plugin: msg.plugin,
         threadId: newThreadId,
         channelId,
       });
