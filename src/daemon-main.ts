@@ -1,7 +1,8 @@
 #!/usr/bin/env node
 /**
  * Daemon entry point — invoked by `mm-coder start` as a detached child process.
- * argv[2] = socketPath, argv[3] = pidFile, argv[4] = persistencePath, argv[5] = imConfigPath
+ * argv[2] = socketPath, argv[3] = pidFile, argv[4] = persistencePath,
+ * argv[5] = imConfigPath, argv[6] = imPluginName
  */
 import { Daemon } from './daemon.js';
 import * as path from 'path';
@@ -11,9 +12,10 @@ const socketPath = process.argv[2];
 const pidFile = process.argv[3];
 const persistencePath = process.argv[4] ?? path.join(os.homedir(), '.mm-coder', 'sessions.json');
 const imConfigPath = process.argv[5];
+const imPluginName = process.argv[6] ?? 'mattermost';
 
 if (!socketPath) {
-  process.stderr.write('Usage: daemon-main.js <socketPath> [pidFile] [persistencePath] [imConfigPath]\n');
+  process.stderr.write('Usage: daemon-main.js <socketPath> [pidFile] [persistencePath] [imConfigPath] [imPluginName]\n');
   process.exit(1);
 }
 
@@ -21,6 +23,7 @@ const daemon = new Daemon(socketPath, {
   persistencePath,
   ...(imConfigPath ? { imConfigPath } : {}),
   enableIM: true,
+  imPluginName,
 });
 
 if (pidFile) {
