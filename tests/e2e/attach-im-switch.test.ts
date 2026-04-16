@@ -6,6 +6,7 @@ import * as net from 'net';
 import { SessionRegistry } from '../../src/session-registry.js';
 import { IMMessageDispatcher } from '../../src/im-message-dispatcher.js';
 import { MockIMPlugin } from '../helpers/mock-im-plugin.js';
+import { MockCLIPlugin } from '../helpers/mock-cli-plugin.js';
 import { IPCServer } from '../../src/ipc/socket-server.js';
 import { attachSession } from '../../src/attach.js';
 
@@ -140,8 +141,7 @@ describe('attach + IM 切换 E2E', () => {
       registry,
       imPlugin: mockIM,
       imTarget: { plugin: 'mock', threadId: 'thread-1' },
-      cliCommand: mockCliIM,
-      cliArgs: [],
+      cliPlugin: new MockCLIPlugin(mockCliIM),
       pollIntervalMs: 50,
     });
 
@@ -177,8 +177,7 @@ describe('attach + IM 切换 E2E', () => {
       registry,
       imPlugin: mockIM,
       imTarget: { plugin: 'mock', threadId: 'thread-2' },
-      cliCommand: mockCliIM,
-      cliArgs: [],
+      cliPlugin: new MockCLIPlugin(mockCliIM),
       pollIntervalMs: 50,
       onSessionImDone: (name) => {
         // When IM finishes, push session_resume so waiting attach can proceed

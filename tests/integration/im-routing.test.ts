@@ -8,6 +8,7 @@ import * as fs from 'fs';
 import { Daemon } from '../../src/daemon.js';
 import { SessionRegistry } from '../../src/session-registry.js';
 import { MockIMPlugin } from '../helpers/mock-im-plugin.js';
+import { MockCLIPlugin } from '../helpers/mock-cli-plugin.js';
 import { IMMessageDispatcher } from '../../src/im-message-dispatcher.js';
 import type { IncomingMessage } from '../../src/types.js';
 
@@ -178,8 +179,7 @@ describe('IMMessageDispatcher 动态 thread 路由', () => {
       registry,
       imPlugin: mockIM,
       imTarget: { plugin: 'mattermost', channelId: 'ch1', threadId: 'FIXED-WRONG-THREAD' },
-      cliCommand: mockCli,
-      cliArgs: [],
+      cliPlugin: new MockCLIPlugin(mockCli),
     });
     dispatcher.start();
 
@@ -218,8 +218,7 @@ describe('IMMessageDispatcher 动态 thread 路由', () => {
       registry,
       imPlugin: mockIM,
       imTarget: { plugin: 'mattermost', channelId: 'ch1', threadId: '' },
-      cliCommand: mockCli,
-      cliArgs: [],
+      cliPlugin: new MockCLIPlugin(mockCli),
       pollIntervalMs: 50,
     });
     dispatcher.start();
@@ -259,8 +258,7 @@ describe('IMMessageDispatcher 动态 thread 路由', () => {
       registry,
       imPlugin: mockIM,
       imTarget: { plugin: 'mattermost', channelId: 'ch1', threadId: '' },
-      cliCommand: failCli,
-      cliArgs: [],
+      cliPlugin: new MockCLIPlugin(failCli),
       maxRetries: 0,
     });
     dispatcher.start();

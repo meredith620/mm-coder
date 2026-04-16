@@ -5,6 +5,7 @@ import * as path from 'path';
 import { SessionRegistry } from '../../src/session-registry.js';
 import { IMMessageDispatcher } from '../../src/im-message-dispatcher.js';
 import { MockIMPlugin } from '../helpers/mock-im-plugin.js';
+import { MockCLIPlugin } from '../helpers/mock-cli-plugin.js';
 
 describe('IM 消息处理 E2E', () => {
   let tmpDir: string;
@@ -40,8 +41,7 @@ describe('IM 消息处理 E2E', () => {
       registry,
       imPlugin: mockIM,
       imTarget: { plugin: 'mock', threadId: 'thread-1' },
-      cliCommand: mockCli,
-      cliArgs: [],
+      cliPlugin: new MockCLIPlugin(mockCli),
     });
 
     dispatcher.start();
@@ -86,8 +86,7 @@ describe('IM 消息处理 E2E', () => {
       registry,
       imPlugin: mockIM,
       imTarget: { plugin: 'mock', threadId: 'thread-2' },
-      cliCommand: crashScript,
-      cliArgs: [],
+      cliPlugin: new MockCLIPlugin(crashScript),
       maxRetries: 2,
     });
 

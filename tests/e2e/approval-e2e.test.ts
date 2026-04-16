@@ -8,6 +8,7 @@ import { IMMessageDispatcher } from '../../src/im-message-dispatcher.js';
 import { ApprovalHandler } from '../../src/approval-handler.js';
 import { ApprovalManager } from '../../src/approval-manager.js';
 import { MockIMPlugin } from '../helpers/mock-im-plugin.js';
+import { MockCLIPlugin } from '../helpers/mock-cli-plugin.js';
 
 /**
  * E2E: IM 消息 → mock claude 触发 can_use_tool → ApprovalHandler 通知 IM
@@ -102,8 +103,7 @@ setTimeout(() => { console.log(buf.trim()); s.destroy(); }, 2000);
       registry,
       imPlugin: mockIM,
       imTarget: { plugin: 'mock', threadId: 'thread-approval' },
-      cliCommand: mockCli,
-      cliArgs: [],
+      cliPlugin: new MockCLIPlugin(mockCli),
       pollIntervalMs: 50,
     });
 
@@ -193,8 +193,7 @@ setTimeout(() => { console.log(buf.trim()); s.destroy(); }, 2000);
       registry,
       imPlugin: mockIM,
       imTarget: { plugin: 'mock', threadId: 'thread-timeout' },
-      cliCommand: mockCli,
-      cliArgs: [],
+      cliPlugin: new MockCLIPlugin(mockCli),
       pollIntervalMs: 50,
     });
 

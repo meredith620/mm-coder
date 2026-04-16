@@ -6,6 +6,7 @@ import { Readable, Writable } from 'stream';
 import { SessionRegistry } from '../../src/session-registry.js';
 import { IMMessageDispatcher } from '../../src/im-message-dispatcher.js';
 import { StdioIMPlugin } from '../../src/plugins/im/stdio.js';
+import { MockCLIPlugin } from '../helpers/mock-cli-plugin.js';
 
 /**
  * E2E: stdio IM 插件完整链路测试
@@ -72,8 +73,7 @@ describe('StdioIMPlugin 完整链路 E2E', () => {
       registry,
       imPlugin: stdioPlugin,
       imTarget: { plugin: 'stdio', threadId: 'thread-1' },
-      cliCommand: mockCli,
-      cliArgs: [],
+      cliPlugin: new MockCLIPlugin(mockCli),
     });
 
     dispatcher.start();
@@ -129,8 +129,7 @@ describe('StdioIMPlugin 完整链路 E2E', () => {
       registry,
       imPlugin: stdioPlugin,
       imTarget: { plugin: 'stdio', threadId: 'thread-2' },
-      cliCommand: mockCli,
-      cliArgs: [],
+      cliPlugin: new MockCLIPlugin(mockCli),
     });
 
     dispatcher.start();
