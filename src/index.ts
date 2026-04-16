@@ -7,7 +7,8 @@ import { fileURLToPath } from 'url';
 import { IPCClient } from './ipc/client.js';
 import { attachSession } from './attach.js';
 import { parseCLIArgs } from './cli-parser.js';
-import { writeMattermostConfigTemplate, verifyMattermostConnection, getDefaultMattermostConfigPath } from './plugins/im/mattermost.js';
+import { getCLIPlugin } from './plugins/cli/registry.js';
+import { getIMPluginFactory, listIMPlugins } from './plugins/im/registry.js';
 
 const SOCKET_PATH = process.env.MM_CODER_SOCKET ?? path.join(os.tmpdir(), 'mm-coder-daemon.sock');
 const PID_FILE = process.env.MM_CODER_PID_FILE ?? path.join(os.tmpdir(), 'mm-coder-daemon.pid');
@@ -52,15 +53,8 @@ async function main() {
       case 'import':
         await handleImport(parsed.args);
         break;
-      case 'im-init':
-        await handleImInit(parsed.args);
-        break;
-      case 'im-verify':
-        await handleImVerify(parsed.args);
-        break;
-      case 'im-run':
-        console.error('im-run: not yet implemented');
-        process.exit(1);
+      case 'im':
+        await handleIm(parsed.subcommand!, parsed.args);
         break;
       case 'tui':
         console.error('tui: not yet implemented');
@@ -94,8 +88,11 @@ COMMANDS:
   remove <name>                   Remove a session
   import <sessionId> --workdir <path> [--name <name>]
                                   Import external session
-  im-init [--config <path>]       Create IM config template
-  im-verify [--config <path>]     Verify IM connectivity
+  im init [--plugin <name>] [--config <path>]
+                                  Create IM config template
+  im verify [--plugin <name>] [--config <path>]
+                                  Verify IM connectivity
+  im run <sessionName>            Run IM worker for a session
   --help, -h                      Show this help
 
 EXAMPLES:
@@ -105,8 +102,9 @@ EXAMPLES:
   mm-coder list
   mm-coder status bug-fix
   mm-coder remove bug-fix
-  mm-coder im-init
-  mm-coder im-verify
+  mm-coder im init
+  mm-coder im init --plugin discord
+  mm-coder im verify
 `.trim());
 }
 
@@ -195,11 +193,29 @@ async function handleAttach(args: Record<string, string | undefined>) {
     throw new Error('Missing required argument: name');
   }
 
+  // Query session info from daemon to get the CLI plugin name
+  const client = new IPCClient(SOCKET_PATH);
+  await client.connect();
+  const res = await client.send('status', {});
+  await client.close();
+
+  let cliPluginName = 'claude-code';
+  if (res.ok) {
+    const sessions = res.data!.sessions as Array<Record<string, unknown>>;
+    const session = sessions.find(s => s.name === name);
+    if (session?.cliPlugin && typeof session.cliPlugin === 'string') {
+      cliPluginName = session.cliPlugin;
+    }
+  }
+
+  const cliPlugin = getCLIPlugin(cliPluginName);
+  const cmdSpec = cliPlugin.buildAttachCommand({ sessionId: '', name, workdir: '', cliPlugin: cliPluginName } as any);
+
   await attachSession({
     socketPath: SOCKET_PATH,
     sessionName: name,
-    cliCommand: 'claude',
-    cliArgs: [],
+    cliCommand: cmdSpec.command,
+    cliArgs: cmdSpec.args.filter(a => a !== '--resume' && a !== ''),
   });
 }
 
@@ -300,32 +316,53 @@ async function handleImport(args: Record<string, string | undefined>) {
   console.log(`Session imported as '${imported.name}'`);
 }
 
+async function handleIm(subcommand: string, args: Record<string, string | undefined>) {
+  switch (subcommand) {
+    case 'init':
+      await handleImInit(args);
+      break;
+    case 'verify':
+      await handleImVerify(args);
+      break;
+    case 'run':
+      console.error('im run: not yet implemented');
+      process.exit(1);
+      break;
+    default:
+      console.error(`Unknown im subcommand: ${subcommand}`);
+      process.exit(1);
+  }
+}
+
 async function handleImInit(args: Record<string, string | undefined>) {
-  const configPath = args.config ?? getDefaultMattermostConfigPath();
+  const pluginName = args.plugin ?? 'mattermost';
+  const factory = getIMPluginFactory(pluginName);
+  const configPath = args.config ?? factory.getDefaultConfigPath();
 
   try {
-    writeMattermostConfigTemplate(configPath);
+    factory.writeConfigTemplate(configPath);
     console.log(`Config template written to: ${configPath}`);
     console.log('');
     console.log('Next steps:');
     console.log(`  1. Edit ${configPath}`);
-    console.log('  2. Fill in your Mattermost URL, bot token, and channel ID');
-    console.log('  3. Run: mm-coder im-verify');
+    console.log(`  2. Fill in your ${pluginName} configuration`);
+    console.log(`  3. Run: mm-coder im-verify --plugin ${pluginName}`);
   } catch (err) {
     throw new Error((err as Error).message);
   }
 }
 
 async function handleImVerify(args: Record<string, string | undefined>) {
+  const pluginName = args.plugin ?? 'mattermost';
+  const factory = getIMPluginFactory(pluginName);
   const configPath = args.config;
 
-  console.log('Verifying Mattermost connection...');
-  const result = await verifyMattermostConnection(configPath);
+  console.log(`Verifying ${pluginName} connection...`);
+  const result = await factory.verifyConnection(configPath);
 
   console.log('Connection OK');
-  console.log(`  URL: ${result.config.url}`);
+  console.log(`  Plugin: ${pluginName}`);
   console.log(`  Bot user ID: ${result.botUserId}`);
-  console.log(`  Channel ID: ${result.config.channelId}`);
 }
 
 main().catch(err => {
