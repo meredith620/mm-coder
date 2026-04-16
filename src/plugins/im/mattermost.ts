@@ -39,11 +39,13 @@ export function getMattermostConfigGuide(configPath = getDefaultMattermostConfig
     plugin: 'mattermost',
     configPath,
     example: {
-      mattermost: {
-        url: 'https://your-mattermost-server.example.com',
-        token: 'your-bot-token-here',
-        channelId: 'your-channel-id-here',
-        reconnectIntervalMs: 5000,
+      im: {
+        mattermost: {
+          url: 'https://your-mattermost-server.example.com',
+          token: 'your-bot-token-here',
+          channelId: 'your-channel-id-here',
+          reconnectIntervalMs: 5000,
+        },
       },
     },
   };
@@ -75,9 +77,15 @@ export function loadMattermostConfig(configPath = getDefaultMattermostConfigPath
     throw new Error(`Invalid Mattermost config format in ${configPath}`);
   }
 
-  const raw = isRecord(parsed['mattermost'])
-    ? parsed['mattermost']
-    : parsed;
+  // Support three config formats:
+  // 1. { "im": { "mattermost": { url, token, channelId } } }  (new multi-IM format)
+  // 2. { "mattermost": { url, token, channelId } }            (grouped format)
+  // 3. { url, token, channelId }                               (flat format)
+  const raw = isRecord(parsed['im']) && isRecord((parsed['im'] as Record<string, unknown>)['mattermost'])
+    ? (parsed['im'] as Record<string, unknown>)['mattermost'] as Record<string, unknown>
+    : isRecord(parsed['mattermost'])
+      ? parsed['mattermost']
+      : parsed;
 
   const url = requireNonEmptyString(raw['url'], 'url', configPath);
   const token = requireNonEmptyString(raw['token'], 'token', configPath);

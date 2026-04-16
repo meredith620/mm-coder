@@ -87,6 +87,26 @@ describe('Mattermost config loader', () => {
     expect(cfg.channelId).toBe(CHANNEL_ID);
   });
 
+  test('支持 im.mattermost 多 IM 配置结构', () => {
+    const configPath = path.join(tmpDir, 'config.json');
+    fs.writeFileSync(configPath, JSON.stringify({
+      im: {
+        mattermost: {
+          url: BASE_URL,
+          token: TOKEN,
+          channelId: CHANNEL_ID,
+          reconnectIntervalMs: 3000,
+        },
+      },
+    }));
+
+    const cfg = loadMattermostConfig(configPath);
+    expect(cfg.url).toBe(BASE_URL);
+    expect(cfg.token).toBe(TOKEN);
+    expect(cfg.channelId).toBe(CHANNEL_ID);
+    expect(cfg.reconnectIntervalMs).toBe(3000);
+  });
+
   test('缺失必填字段时报错', () => {
     const configPath = path.join(tmpDir, 'config.json');
     fs.writeFileSync(configPath, JSON.stringify({ url: BASE_URL, token: TOKEN }));
