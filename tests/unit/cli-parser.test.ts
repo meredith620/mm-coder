@@ -119,4 +119,47 @@ describe('CLI 命令解析', () => {
   test('未知命令抛出错误', () => {
     expect(() => parseCLIArgs(['unknown-cmd'])).toThrow();
   });
+
+  test('短参数 -n 映射到 name', () => {
+    const parsed = parseCLIArgs(['create', '-n', 'my-session']);
+    expect(parsed.args.name).toBe('my-session');
+  });
+
+  test('短参数 -s 映射到 sessionId', () => {
+    const parsed = parseCLIArgs(['import', '-s', 'uuid-456']);
+    expect(parsed.args.sessionId).toBe('uuid-456');
+  });
+
+  test('短参数 -p 映射到 plugin', () => {
+    const parsed = parseCLIArgs(['im', 'init', '-p', 'discord']);
+    expect(parsed.args.plugin).toBe('discord');
+  });
+
+  test('短参数 -c 映射到 config', () => {
+    const parsed = parseCLIArgs(['im', 'verify', '-c', '/path/to/config.json']);
+    expect(parsed.args.config).toBe('/path/to/config.json');
+  });
+
+  test('短参数 -C 映射到 cli', () => {
+    const parsed = parseCLIArgs(['create', 'test', '-C', 'my-cli']);
+    expect(parsed.args.cli).toBe('my-cli');
+  });
+
+  test('短参数 -w 映射到 workdir', () => {
+    const parsed = parseCLIArgs(['create', 'test', '-w', '/tmp']);
+    expect(parsed.args.workdir).toBe('/tmp');
+  });
+
+  test('短参数组合使用', () => {
+    const parsed = parseCLIArgs(['create', 'test', '-n', 'named', '-w', '/tmp', '-C', 'my-cli']);
+    expect(parsed.args.name).toBe('named');
+    expect(parsed.args.workdir).toBe('/tmp');
+    expect(parsed.args.cli).toBe('my-cli');
+  });
+
+  test('混合长短参数', () => {
+    const parsed = parseCLIArgs(['im', 'init', '-p', 'discord', '--config', '/path.json']);
+    expect(parsed.args.plugin).toBe('discord');
+    expect(parsed.args.config).toBe('/path.json');
+  });
 });

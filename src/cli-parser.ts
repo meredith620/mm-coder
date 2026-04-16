@@ -47,9 +47,14 @@ export function parseCLIArgs(argv: string[]): ParsedCLI {
   let i = 0;
   const positionals: string[] = [];
 
-  // Short-flag aliases: map single-char flag → canonical long key
+// Short-flag aliases: map single-char flag → canonical long key
   const SHORT_FLAGS: Record<string, string> = {
+    'n': 'name',
     'w': 'workdir',
+    's': 'sessionId',
+    'p': 'plugin',
+    'c': 'config',
+    'C': 'cli',
   };
 
   while (i < argsRest.length) {
@@ -75,25 +80,25 @@ export function parseCLIArgs(argv: string[]): ParsedCLI {
     }
   }
 
-  // Map positional args based on command
+// Map positional args based on command — only if not already set by a flag
   switch (command) {
     case 'create':
-      if (positionals[0]) args['name'] = positionals[0];
+      if (positionals[0] && !args['name']) args['name'] = positionals[0];
       break;
     case 'attach':
-      if (positionals[0]) args['name'] = positionals[0];
+      if (positionals[0] && !args['name']) args['name'] = positionals[0];
       break;
     case 'import':
-      if (positionals[0]) args['sessionId'] = positionals[0];
+      if (positionals[0] && !args['sessionId']) args['sessionId'] = positionals[0];
       break;
     case 'status':
-      if (positionals[0]) args['name'] = positionals[0];
+      if (positionals[0] && !args['name']) args['name'] = positionals[0];
       break;
     case 'remove':
-      if (positionals[0]) args['name'] = positionals[0];
+      if (positionals[0] && !args['name']) args['name'] = positionals[0];
       break;
     case 'im':
-      if (subcommand === 'run' && positionals[0]) args['sessionName'] = positionals[0];
+      if (subcommand === 'run' && positionals[0] && !args['sessionName']) args['sessionName'] = positionals[0];
       break;
   }
 
