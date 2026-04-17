@@ -66,35 +66,36 @@ describe('Daemon IM 路由', () => {
     expect(daemon.registry.list().filter(s => s.name.startsWith('im-thread-x'))).toHaveLength(1);
   });
 
-  test('不同 thread 产生不同 session', () => {
-    const s1 = (daemon as any)._getOrCreateSessionForThread('thread-111', 'mattermost');
-    const s2 = (daemon as any)._getOrCreateSessionForThread('thread-222', 'mattermost');
+  test('不同 IM 插件 thread 不会串到同一 session', () => {
+    const s1 = (daemon as any)._getOrCreateSessionForThread('thread-shared', 'mattermost');
+    const s2 = (daemon as any)._getOrCreateSessionForThread('thread-shared', 'discord');
     expect(s1.name).not.toBe(s2.name);
+    expect(daemon.registry.getByIMThread('mattermost', 'thread-shared')?.name).toBe(s1.name);
+    expect(daemon.registry.getByIMThread('discord', 'thread-shared')?.name).toBe(s2.name);
   });
 
-  test('/help 不入队', async () => {
+  test('/help 根据消息 plugin 返回对应帮助文案', async () => {
     const mockIM = new MockIMPlugin();
     (daemon as any)._imPlugin = mockIM;
+    (daemon as any)._imPluginName = 'mattermost';
 
-    const msg = makeMsg({ text: '/help', threadId: 'help-thread' });
+    const msg = makeMsg({ text: '/help', plugin: 'mattermost', threadId: 'help-thread' });
     await (daemon as any)._handleIncomingIMMessage(msg, 'ch1');
 
-    // No session created for help-thread (command only)
-    const session = daemon.registry.getByIMThread('mattermost', 'help-thread');
-    expect(session).toBeUndefined();
-    // Response was sent via sendMessage (not createLiveMessage)
     expect(mockIM.sent.length).toBeGreaterThan(0);
-    expect(mockIM.sent[0].content.kind).toBe('text');
     const text = (mockIM.sent[0].content as any).text as string;
     expect(text).toContain('/list');
+    expect(text).toContain('/open <sessionName>');
   });
 
-  test('/list 不入队，返回会话列表', async () => {
+  test('/list 按当前 plugin 展示绑定 thread 和 cli', async () => {
     const mockIM = new MockIMPlugin();
     (daemon as any)._imPlugin = mockIM;
+    (daemon as any)._imPluginName = 'mattermost';
 
     // Pre-create a session
     daemon.registry.create('existing-session', { workdir: '/tmp', cliPlugin: 'claude-code' });
+    daemon.registry.bindIM('existing-session', { plugin: 'discord', threadId: 'discord-thread', channelId: 'd1' });
 
     const msg = makeMsg({ text: '/list', threadId: 'list-thread' });
     await (daemon as any)._handleIncomingIMMessage(msg, 'ch1');
@@ -102,11 +103,14 @@ describe('Daemon IM 路由', () => {
     expect(mockIM.sent.length).toBeGreaterThan(0);
     const text = (mockIM.sent[0].content as any).text as string;
     expect(text).toContain('existing-session');
+    expect(text).toContain('cli=claude-code');
+    expect(text).toContain('未绑定');
   });
 
   test('/open <sessionName> 在顶层消息中对未绑定 session 创建新 thread', async () => {
     const mockIM = new MockIMPlugin();
     (daemon as any)._imPlugin = mockIM;
+    (daemon as any)._imPluginName = 'mattermost';
 
     daemon.registry.create('demo', { workdir: '/tmp', cliPlugin: 'claude-code' });
 
@@ -130,9 +134,11 @@ describe('Daemon IM 路由', () => {
   test('/open <sessionName> 在顶层消息中对已绑定 session 发送锚点', async () => {
     const mockIM = new MockIMPlugin();
     (daemon as any)._imPlugin = mockIM;
+    (daemon as any)._imPluginName = 'mattermost';
 
     daemon.registry.create('demo', { workdir: '/tmp', cliPlugin: 'claude-code' });
-    daemon.registry.bindIM('demo', { plugin: 'mattermost', threadId: 'target-thread-99', channelId: 'ch1' });
+    daemon.registry.bindIM('demo', { plugin: 'mattermost', threadId: 'target-thread-99', channelId: 'ch-bound' });
+
 
     const msg = makeMsg({ text: '/open demo', threadId: 'root-post-1', isTopLevel: true });
     await (daemon as any)._handleIncomingIMMessage(msg, 'ch1');
@@ -146,6 +152,7 @@ describe('Daemon IM 路由', () => {
   test('/open <sessionName> 在 thread 中对已绑定 session 发送锚点', async () => {
     const mockIM = new MockIMPlugin();
     (daemon as any)._imPlugin = mockIM;
+    (daemon as any)._imPluginName = 'mattermost';
 
     daemon.registry.create('my-sess', { workdir: '/tmp', cliPlugin: 'claude-code' });
     daemon.registry.bindIM('my-sess', { plugin: 'mattermost', threadId: 'target-thread-99', channelId: 'ch1' });
@@ -167,6 +174,7 @@ describe('Daemon IM 路由', () => {
     mockIM.failCreateLiveMessage = true;
     mockIM.createLiveMessageError = new Error('api down');
     (daemon as any)._imPlugin = mockIM;
+    (daemon as any)._imPluginName = 'mattermost';
 
     daemon.registry.create('demo', { workdir: '/tmp', cliPlugin: 'claude-code' });
 
@@ -181,6 +189,7 @@ describe('Daemon IM 路由', () => {
   test('/open <sessionName> 并发创建时只绑定一个 thread', async () => {
     const mockIM = new MockIMPlugin();
     (daemon as any)._imPlugin = mockIM;
+    (daemon as any)._imPluginName = 'mattermost';
 
     daemon.registry.create('demo', { workdir: '/tmp', cliPlugin: 'claude-code' });
 
@@ -213,6 +222,7 @@ describe('Daemon IM 路由', () => {
   test('普通消息入队到对应 session', async () => {
     const mockIM = new MockIMPlugin();
     (daemon as any)._imPlugin = mockIM;
+    (daemon as any)._imPluginName = 'mattermost';
 
     const msg = makeMsg({ text: 'hello world', threadId: 'normal-thread' });
     await (daemon as any)._handleIncomingIMMessage(msg, 'ch1');

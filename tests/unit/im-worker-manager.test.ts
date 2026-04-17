@@ -15,6 +15,10 @@ class MockCLIPlugin implements CLIPlugin {
     return { command: 'sleep', args: ['60'] };
   }
 
+  buildIMMessageCommand(session: Session, prompt: string): CommandSpec {
+    return { command: 'sleep', args: ['60'] };
+  }
+
   generateSessionId(): string {
     return 'mock-session-id';
   }
@@ -27,6 +31,10 @@ class CrashingCLIPlugin implements CLIPlugin {
   }
 
   buildIMWorkerCommand(session: Session, bridgeScriptPath: string): CommandSpec {
+    return { command: 'false', args: [] };
+  }
+
+  buildIMMessageCommand(session: Session, prompt: string): CommandSpec {
     return { command: 'false', args: [] };
   }
 

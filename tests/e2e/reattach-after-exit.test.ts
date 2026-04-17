@@ -3,7 +3,11 @@ import * as path from 'path';
 import * as os from 'os';
 import * as fs from 'fs';
 import { spawn, type ChildProcess } from 'child_process';
+import { fileURLToPath } from 'url';
 import { IPCClient } from '../../src/ipc/client.js';
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const DAEMON_ENTRY = path.resolve(__dirname, '../../src/daemon-main.ts');
 
 describe('Re-attach after CLI exit E2E', () => {
   let tmpDir: string;
@@ -16,8 +20,7 @@ describe('Re-attach after CLI exit E2E', () => {
     const persistencePath = path.join(tmpDir, 'sessions.json');
 
     // Start daemon with isolated persistence
-    const daemonScript = path.resolve('./dist/daemon-main.js');
-    daemonProc = spawn(process.execPath, [daemonScript, socketPath, '', persistencePath], {
+    daemonProc = spawn(process.execPath, ['--import', 'tsx', DAEMON_ENTRY, socketPath, '', persistencePath], {
       stdio: 'ignore',
       detached: false,
     });
@@ -110,8 +113,7 @@ describe('Re-attach after CLI exit E2E', () => {
       await new Promise(resolve => setTimeout(resolve, 200));
     }
 
-    const daemonScript = path.resolve('./dist/daemon-main.js');
-    daemonProc = spawn(process.execPath, [daemonScript, socketPath, '', persistencePath], {
+    daemonProc = spawn(process.execPath, ['--import', 'tsx', DAEMON_ENTRY, socketPath, '', persistencePath], {
       stdio: 'ignore',
       detached: false,
     });
@@ -160,7 +162,7 @@ describe('Re-attach after CLI exit E2E', () => {
     daemonProc.kill('SIGTERM');
     await new Promise(resolve => setTimeout(resolve, 200));
 
-    daemonProc = spawn(process.execPath, [daemonScript, socketPath, '', persistencePath], {
+    daemonProc = spawn(process.execPath, ['--import', 'tsx', DAEMON_ENTRY, socketPath, '', persistencePath], {
       stdio: 'ignore',
       detached: false,
     });

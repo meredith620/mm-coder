@@ -7,12 +7,13 @@
 import { Daemon } from './daemon.js';
 import * as path from 'path';
 import * as os from 'os';
+import { getDefaultIMPluginName } from './plugins/im/registry.js';
 
 const socketPath = process.argv[2];
 const pidFile = process.argv[3];
 const persistencePath = process.argv[4] ?? path.join(os.homedir(), '.mm-coder', 'sessions.json');
 const imConfigPath = process.argv[5];
-const imPluginName = process.argv[6] ?? 'mattermost';
+const imPluginName = process.argv[6] ?? getDefaultIMPluginName();
 
 if (!socketPath) {
   process.stderr.write('Usage: daemon-main.js <socketPath> [pidFile] [persistencePath] [imConfigPath] [imPluginName]\n');

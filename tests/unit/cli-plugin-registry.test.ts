@@ -1,5 +1,5 @@
 import { describe, test, expect } from 'vitest';
-import { getCLIPlugin, listCLIPlugins } from '../../src/plugins/cli/registry.js';
+import { getCLIPlugin, listCLIPlugins, getDefaultCLIPluginName } from '../../src/plugins/cli/registry.js';
 import { ClaudeCodePlugin } from '../../src/plugins/cli/claude-code.js';
 
 describe('CLI Plugin Registry', () => {
@@ -16,6 +16,10 @@ describe('CLI Plugin Registry', () => {
     const plugins = listCLIPlugins();
     expect(plugins).toContain('claude-code');
     expect(plugins.length).toBeGreaterThan(0);
+  });
+
+  test('默认 CLI 插件名为 claude-code', () => {
+    expect(getDefaultCLIPluginName()).toBe('claude-code');
   });
 
   test('getCLIPlugin 每次调用返回新实例', () => {

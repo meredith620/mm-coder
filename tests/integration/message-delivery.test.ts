@@ -28,6 +28,10 @@ class EchoCLIPlugin implements CLIPlugin {
     };
   }
 
+  buildIMMessageCommand(session: Session, prompt: string): CommandSpec {
+    return { command: 'cat', args: [] };
+  }
+
   generateSessionId(): string {
     return 'mock-session-id';
   }
@@ -39,6 +43,10 @@ class SleepCLIPlugin implements CLIPlugin {
   }
 
   buildIMWorkerCommand(session: Session, bridgeScriptPath: string): CommandSpec {
+    return { command: 'sleep', args: ['60'] };
+  }
+
+  buildIMMessageCommand(session: Session, prompt: string): CommandSpec {
     return { command: 'sleep', args: ['60'] };
   }
 

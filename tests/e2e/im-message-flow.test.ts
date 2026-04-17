@@ -52,7 +52,7 @@ describe('IM 消息处理 E2E', () => {
       threadId: 'thread-1',
       messageId: 'msg-1',
       userId: 'user-1',
-      content: 'hello',
+      text: 'hello',
       dedupeKey: 'dedup-1',
     });
 
@@ -97,7 +97,7 @@ describe('IM 消息处理 E2E', () => {
       threadId: 'thread-2',
       messageId: 'msg-crash',
       userId: 'user-1',
-      content: 'test crash recovery',
+      text: 'test crash recovery',
       dedupeKey: 'dedup-crash',
     });
 

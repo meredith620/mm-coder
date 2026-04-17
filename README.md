@@ -41,6 +41,33 @@ mm-coder attach bug-fix                     # 再次进入，自动 resume
 
 ```json
 {
+  "im": {
+    "mattermost": {
+      "url": "https://mattermost.example.com",
+      "token": "your-bot-token",
+      "channelId": "channel-id",
+      "reconnectIntervalMs": 5000
+    }
+  }
+}
+```
+
+仍兼容旧格式：
+
+```json
+{
+  "mattermost": {
+    "url": "https://mattermost.example.com",
+    "token": "your-bot-token",
+    "channelId": "channel-id"
+  }
+}
+```
+
+以及最早的平铺格式：
+
+```json
+{
   "url": "https://mattermost.example.com",
   "token": "your-bot-token",
   "channelId": "channel-id"
@@ -54,24 +81,25 @@ mm-coder attach bug-fix                     # 再次进入，自动 resume
 | `channelId` | 监听消息的频道 ID |
 | `reconnectIntervalMs` | WebSocket 重连间隔（可选，默认 5000ms） |
 
-也可使用命名分组格式：
+## 插件开发
 
-```json
-{
-  "mattermost": {
-    "url": "https://mattermost.example.com",
-    "token": "your-bot-token",
-    "channelId": "channel-id"
-  }
-}
-```
+当前默认插件：
+- 默认 CLI 插件：`claude-code`
+- 默认 IM 插件：`mattermost`
+
+扩展方式：
+- 新增 CLI 插件：实现 `src/plugins/types.ts` 中的 `CLIPlugin`，并注册到 `src/plugins/cli/registry.ts`
+- 新增 IM 插件：实现 `src/plugins/types.ts` 中的 `IMPlugin`，并注册到 `src/plugins/im/registry.ts`
+
+更完整的开发与发布说明见 [docs/DEV-OPS.md](docs/DEV-OPS.md)。
 
 ## 架构
 
 Session-based 混合方案：
 
-- **终端**：直接运行 `claude --session-id <id> --resume`，stdio 直通，零代理层
-- **IM**：daemon 调用 `claude -p "msg" --session-id <id> --output-format stream-json`，结构化输出
+- **终端**：CLI 插件负责构造 attach 命令，默认实现为 `claude --resume <id>`
+- **IM**：daemon 根据 session 的 `cliPlugin` 动态选择 CLI 插件，执行 `buildIMMessageCommand()`
+- **路由**：IM 回复目标优先使用消息自身的 `plugin/channelId/threadId`，不再依赖单一固定 thread
 - 两端通过 session ID 共享同一会话上下文，互斥使用
 
 详见 [docs/SPEC.md](docs/SPEC.md)。

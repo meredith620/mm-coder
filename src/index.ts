@@ -7,8 +7,9 @@ import { fileURLToPath } from 'url';
 import { IPCClient } from './ipc/client.js';
 import { attachSession } from './attach.js';
 import { parseCLIArgs } from './cli-parser.js';
-import { getCLIPlugin } from './plugins/cli/registry.js';
-import { getIMPluginFactory } from './plugins/im/registry.js';
+import { getCLIPlugin, getDefaultCLIPluginName } from './plugins/cli/registry.js';
+import { getIMPluginFactory, getDefaultIMPluginName } from './plugins/im/registry.js';
+import type { Session } from './types.js';
 
 const SOCKET_PATH = process.env.MM_CODER_SOCKET ?? path.join(os.tmpdir(), 'mm-coder-daemon.sock');
 const PID_FILE = process.env.MM_CODER_PID_FILE ?? path.join(os.tmpdir(), 'mm-coder-daemon.pid');
@@ -38,13 +39,13 @@ async function main() {
 
     switch (parsed.command) {
       case 'start':
-        await handleStart();
+        await handleStart(parsed.args);
         break;
       case 'stop':
         await handleStop();
         break;
       case 'restart':
-        await handleRestart();
+        await handleRestart(parsed.args);
         break;
       case 'create':
         await handleCreate(parsed.args);
@@ -121,7 +122,7 @@ EXAMPLES:
 `.trim());
 }
 
-async function handleStart() {
+async function handleStart(args: Record<string, string | undefined>) {
   if (fs.existsSync(PID_FILE)) {
     const pid = parseInt(fs.readFileSync(PID_FILE, 'utf-8').trim(), 10);
     try {
@@ -135,12 +136,18 @@ async function handleStart() {
 
   fs.mkdirSync(path.dirname(PERSISTENCE_PATH), { recursive: true });
 
-  const child = spawn(process.execPath, [
+  const imPluginName = args.plugin ?? getDefaultIMPluginName();
+  const imConfigPath = args.config;
+  const childArgs = [
     path.join(path.dirname(fileURLToPath(import.meta.url)), 'daemon-main.js'),
     SOCKET_PATH,
     PID_FILE,
     PERSISTENCE_PATH,
-  ], {
+    imConfigPath ?? '',
+    imPluginName,
+  ];
+
+  const child = spawn(process.execPath, childArgs, {
     detached: true,
     stdio: 'ignore',
   });
@@ -165,16 +172,16 @@ async function handleStop() {
   }
 }
 
-async function handleRestart() {
+async function handleRestart(args: Record<string, string | undefined>) {
   await handleStop();
   await new Promise(resolve => setTimeout(resolve, 500));
-  await handleStart();
+  await handleStart(args);
 }
 
 async function handleCreate(args: Record<string, string | undefined>) {
   const name = args.name;
   const workdir = args.workdir ?? process.cwd();
-  const cli = args.cli ?? 'claude-code';
+  const cli = args.cli ?? getDefaultCLIPluginName();
 
   if (!name) {
     throw new Error('Missing required argument: name');
@@ -205,23 +212,48 @@ async function handleAttach(args: Record<string, string | undefined>) {
   const res = await client.send('status', {});
   await client.close();
 
-  let cliPluginName = 'claude-code';
-  if (res.ok) {
-    const sessions = res.data!.sessions as Array<Record<string, unknown>>;
-    const session = sessions.find(s => s.name === name);
-    if (session?.cliPlugin && typeof session.cliPlugin === 'string') {
-      cliPluginName = session.cliPlugin;
-    }
+  if (!res.ok) {
+    throw new Error(`Failed to get status: ${res.error!.message}`);
+  }
+
+  const sessions = res.data!.sessions as Array<Record<string, unknown>>;
+  const sessionSummary = sessions.find(s => s.name === name);
+  if (!sessionSummary) {
+    throw new Error(`Session not found: ${name}`);
+  }
+
+  const cliPluginName = typeof sessionSummary.cliPlugin === 'string' ? sessionSummary.cliPlugin : getDefaultCLIPluginName();
+  const session: Session = {
+    name,
+    sessionId: typeof sessionSummary.sessionId === 'string' ? sessionSummary.sessionId : '',
+    cliPlugin: cliPluginName,
+    workdir: typeof sessionSummary.workdir === 'string' ? sessionSummary.workdir : process.cwd(),
+    status: (sessionSummary.status as Session['status']) ?? 'idle',
+    lifecycleStatus: (sessionSummary.lifecycleStatus as Session['lifecycleStatus']) ?? 'active',
+    initState: 'initialized',
+    revision: 0,
+    spawnGeneration: 0,
+    attachedPid: null,
+    imWorkerPid: null,
+    imWorkerCrashCount: 0,
+    imBindings: [],
+    messageQueue: [],
+    createdAt: sessionSummary.createdAt instanceof Date ? sessionSummary.createdAt : new Date(String(sessionSummary.createdAt ?? Date.now())),
+    lastActivityAt: new Date(),
+  };
+
+  if (!session.sessionId) {
+    throw new Error(`Session ${name} is missing sessionId`);
   }
 
   const cliPlugin = getCLIPlugin(cliPluginName);
-  const cmdSpec = cliPlugin.buildAttachCommand({ sessionId: '', name, workdir: '', cliPlugin: cliPluginName } as any);
+  const cmdSpec = cliPlugin.buildAttachCommand(session);
 
   await attachSession({
     socketPath: SOCKET_PATH,
     sessionName: name,
     cliCommand: cmdSpec.command,
-    cliArgs: cmdSpec.args.filter(a => a !== '--resume' && a !== ''),
+    cliArgs: cmdSpec.args,
   });
 }
 
@@ -302,7 +334,7 @@ async function handleImport(args: Record<string, string | undefined>) {
   const sessionId = args.sessionId;
   const workdir = args.workdir ?? process.cwd();
   const name = args.name;
-  const cli = args.cli ?? 'claude-code';
+  const cli = args.cli ?? getDefaultCLIPluginName();
 
   if (!sessionId) {
     throw new Error('Missing required argument: sessionId');
@@ -341,7 +373,7 @@ async function handleIm(subcommand: string, args: Record<string, string | undefi
 }
 
 async function handleImInit(args: Record<string, string | undefined>) {
-  const pluginName = args.plugin ?? 'mattermost';
+  const pluginName = args.plugin ?? getDefaultIMPluginName();
   const factory = getIMPluginFactory(pluginName);
   const configPath = args.config ?? factory.getDefaultConfigPath();
 
@@ -359,7 +391,7 @@ async function handleImInit(args: Record<string, string | undefined>) {
 }
 
 async function handleImVerify(args: Record<string, string | undefined>) {
-  const pluginName = args.plugin ?? 'mattermost';
+  const pluginName = args.plugin ?? getDefaultIMPluginName();
   const factory = getIMPluginFactory(pluginName);
   const configPath = args.config;
 

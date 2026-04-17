@@ -36,6 +36,7 @@ export interface EnqueueOptions {
   text: string;
   dedupeKey?: string;
   plugin?: string;
+  channelId?: string;
   threadId?: string;
   messageId?: string;
   userId?: string;
@@ -256,6 +257,8 @@ export class SessionRegistry {
 
     const msg: QueuedMessage = {
       messageId: opts.messageId ?? uuidv4(),
+      plugin: opts.plugin,
+      channelId: opts.channelId,
       threadId: opts.threadId ?? '',
       userId: opts.userId ?? '',
       content: opts.text,
@@ -315,6 +318,8 @@ export class SessionRegistry {
 
     const newMsg: QueuedMessage = {
       messageId: uuidv4(),
+      plugin: original.plugin,
+      channelId: original.channelId,
       threadId: original.threadId,
       userId: original.userId,
       content: original.content,

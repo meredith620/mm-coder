@@ -8,8 +8,10 @@ import { StreamToIM } from './stream-to-im.js';
 export interface IMMessageDispatcherOptions {
   registry: SessionRegistry;
   imPlugin: IMPlugin;
+  imPluginResolver?: (message: QueuedMessage, session: Session) => IMPlugin;
   imTarget: MessageTarget;
-  cliPlugin: CLIPlugin;
+  cliPlugin?: CLIPlugin;
+  cliPluginResolver?: (session: Session) => CLIPlugin;
   pollIntervalMs?: number;
   maxRetries?: number;
   onSessionImDone?: (sessionName: string) => void;
@@ -76,21 +78,39 @@ export class IMMessageDispatcher {
 
   private _buildTarget(message: QueuedMessage): MessageTarget {
     return {
-      ...this._opts.imTarget,
-      threadId: message.threadId,
-      userId: message.userId,
+      plugin: message.plugin ?? this._opts.imTarget.plugin,
+      channelId: message.channelId ?? this._opts.imTarget.channelId,
+      threadId: message.threadId || this._opts.imTarget.threadId,
+      userId: message.userId || this._opts.imTarget.userId,
     };
   }
 
+  private _resolveCLIPlugin(session: Session): CLIPlugin {
+    if (this._opts.cliPluginResolver) {
+      return this._opts.cliPluginResolver(session);
+    }
+    if (this._opts.cliPlugin) {
+      return this._opts.cliPlugin;
+    }
+    throw new Error('IMMessageDispatcher requires cliPlugin or cliPluginResolver');
+  }
+
+  private _resolveIMPlugin(message: QueuedMessage, session: Session): IMPlugin {
+    if (this._opts.imPluginResolver) {
+      return this._opts.imPluginResolver(message, session);
+    }
+    return this._opts.imPlugin;
+  }
+
   private _buildCLICommand(session: Session, message: QueuedMessage) {
-    return this._opts.cliPlugin.buildIMMessageCommand(session, message.content);
+    return this._resolveCLIPlugin(session).buildIMMessageCommand(session, message.content);
   }
 
   private async _processMessage(sessionName: string, messageId: string, attempt = 0): Promise<void> {
     const maxRetries = this._opts.maxRetries ?? 1;
     const registry = this._opts.registry;
     const { session, message } = this._getSessionAndMessage(sessionName, messageId);
-    const streamToIM = new StreamToIM(this._opts.imPlugin, this._buildTarget(message));
+    const streamToIM = new StreamToIM(this._resolveIMPlugin(message, session), this._buildTarget(message));
 
     let finalStatus: QueuedMessage['status'] = 'failed';
     let currentAttempt = attempt;

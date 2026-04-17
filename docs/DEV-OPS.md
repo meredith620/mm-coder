@@ -56,6 +56,43 @@ npm unlink
 
 ---
 
+## 插件开发
+
+### CLI 插件
+
+1. 实现 `src/plugins/types.ts` 中的 `CLIPlugin`
+2. 至少提供以下三个命令构造函数：
+   - `buildAttachCommand(session)`
+   - `buildIMWorkerCommand(session, bridgeScriptPath)`
+   - `buildIMMessageCommand(session, prompt)`
+3. 在 `src/plugins/cli/registry.ts` 注册插件工厂
+4. 如需作为默认插件，修改 registry 中的默认插件常量
+
+当前默认 CLI 插件名：`claude-code`
+
+### IM 插件
+
+1. 实现 `src/plugins/types.ts` 中的 `IMPlugin`
+2. 在 `src/plugins/im/registry.ts` 注册工厂
+3. 工厂需提供：
+   - `load(configPath, opts)`
+   - `getDefaultConfigPath()`
+   - `writeConfigTemplate(configPath)`
+   - `verifyConnection(configPath)`
+   - `getCommandHelpText()`
+4. `IncomingMessage.plugin` 必须稳定标识该 IM 插件名，供 daemon 做动态路由
+
+当前默认 IM 插件名：`mattermost`
+
+### 动态路由约束
+
+- daemon 创建 IM session 时，`session.cliPlugin` 使用默认 CLI 插件名
+- dispatcher 发送 IM 消息时，应按 `session.cliPlugin` 动态解析 CLI 插件
+- `/help`、`/list`、`/status`、`/open` 处理时，应使用 `IncomingMessage.plugin` 做 IM 路由，不得写死 `mattermost`
+- `/open` 已绑定场景下，锚点消息应发送到该 binding 自身的 `channelId/threadId`
+
+---
+
 ## 开发模式运行 Daemon
 
 ```bash
@@ -83,6 +120,12 @@ npm run test:watch
 
 # 覆盖率报告
 npm run test:coverage
+```
+
+建议在改动插件架构后至少补跑：
+
+```bash
+npx vitest run tests/unit/cli-plugin-registry.test.ts tests/unit/im-plugin-registry.test.ts tests/integration/im-routing.test.ts tests/e2e/cli-e2e.test.ts
 ```
 
 ---

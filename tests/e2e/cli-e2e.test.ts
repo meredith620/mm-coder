@@ -20,9 +20,9 @@ import { IPCClient } from '../../src/ipc/client.js';
  */
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const INDEX_JS = path.resolve(__dirname, '../../dist/index.js');
+const SRC_INDEX = path.resolve(__dirname, '../../src/index.ts');
 
-/** Run mm-coder CLI via dist/index.js, return { stdout, stderr, code } */
+/** Run mm-coder CLI via src/index.ts, return { stdout, stderr, code } */
 function runCLI(args: string[], opts: { socketPath?: string; pidFile?: string } = {}): Promise<{
   stdout: string;
   stderr: string;
@@ -35,7 +35,7 @@ function runCLI(args: string[], opts: { socketPath?: string; pidFile?: string } 
       MM_CODER_PID_FILE: opts.pidFile,
     };
 
-    const child = spawn(process.execPath, [INDEX_JS, ...args], {
+    const child = spawn(process.execPath, ['--import', 'tsx', SRC_INDEX, ...args], {
       env,
       stdio: ['ignore', 'pipe', 'pipe'],
     });
@@ -126,23 +126,34 @@ describe('mm-coder CLI E2E', () => {
     expect(stdout).toContain('idle');
   });
 
-  test('attach bug-fix 调用 CLI 并在退出后 session 回到 idle', async () => {
-    // Create a mock CLI that exits immediately
-    const mockCli = path.join(tmpDir, 'mock-claude.sh');
-    fs.writeFileSync(mockCli, '#!/bin/sh\nexit 0\n', { mode: 0o755 });
+  test('attach bug-fix 调用真实 CLI attach 路径并在退出后 session 回到 idle', async () => {
+    const fakeBin = path.join(tmpDir, 'bin');
+    fs.mkdirSync(fakeBin, { recursive: true });
+    const argsFile = path.join(tmpDir, 'claude-args.txt');
+    const fakeClaude = path.join(fakeBin, 'claude');
+    fs.writeFileSync(fakeClaude, `#!/bin/sh\nprintf '%s\n' "$@" > "${argsFile}"\nexit 0\n`, { mode: 0o755 });
 
-    // Attach via IPC directly (CLI attach would spawn real claude)
-    // Instead test the attach IPC flow: attach → attached → markDetached → idle
-    const attachRes = await client.send('attach', { name: 'bug-fix', pid: process.pid });
-    expect(attachRes.ok).toBe(true);
+    const statusRes = await client.send('status', {});
+    const sessions = statusRes.data!.sessions as Array<Record<string, unknown>>;
+    const session = sessions.find(s => s.name === 'bug-fix');
+    expect(session).toBeTruthy();
 
-    let s = daemon.registry.get('bug-fix')!;
-    expect(s.status).toBe('attached');
+    const { code, stderr } = await runCLIWithSocket(
+      ['attach', 'bug-fix'],
+      socketPath,
+      pidFile,
+      { PATH: `${fakeBin}:${process.env.PATH ?? ''}` },
+    );
 
-    // Simulate detach
-    daemon.registry.markDetached('bug-fix', 'normal');
-    s = daemon.registry.get('bug-fix')!;
-    expect(s.status).toBe('idle');
+    expect(code).toBe(0);
+    expect(stderr).toBe('');
+
+    const recordedArgs = fs.readFileSync(argsFile, 'utf8').trim().split('\n').filter(Boolean);
+    expect(recordedArgs).toContain('--resume');
+    expect(recordedArgs).toContain(String(session!.sessionId));
+
+    const updated = daemon.registry.get('bug-fix')!;
+    expect(updated.status).toBe('idle');
   });
 
   test('remove bug-fix 删除 session', async () => {
@@ -251,15 +262,17 @@ function runCLIWithSocket(
   args: string[],
   socketPath: string,
   pidFile?: string,
+  extraEnv: NodeJS.ProcessEnv = {},
 ): Promise<{ stdout: string; stderr: string; code: number }> {
   return new Promise((resolve) => {
     const env: NodeJS.ProcessEnv = {
       ...process.env,
       MM_CODER_SOCKET: socketPath,
       ...(pidFile && { MM_CODER_PID_FILE: pidFile }),
+      ...extraEnv,
     };
 
-    const child = spawn(process.execPath, [INDEX_JS, ...args], {
+    const child = spawn(process.execPath, ['--import', 'tsx', SRC_INDEX, ...args], {
       env,
       stdio: ['ignore', 'pipe', 'pipe'],
     });

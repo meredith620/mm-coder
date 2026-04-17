@@ -7,15 +7,23 @@ import { Writable } from 'stream';
 const MAX_CRASH_COUNT = 3;
 const RESTART_DELAYS = [1000, 3000, 10000]; // ms
 
+type CLIPluginResolver = CLIPlugin | ((session: Session) => CLIPlugin);
+
 export class IMWorkerManager {
-  private _plugin: CLIPlugin;
+  private _pluginResolver: CLIPluginResolver;
   private _registry: SessionRegistry;
   private _processes = new Map<string, ChildProcess>();
   private _restartTimers = new Map<string, NodeJS.Timeout>();
 
-  constructor(plugin: CLIPlugin, registry: SessionRegistry) {
-    this._plugin = plugin;
+  constructor(pluginResolver: CLIPluginResolver, registry: SessionRegistry) {
+    this._pluginResolver = pluginResolver;
     this._registry = registry;
+  }
+
+  private _resolvePlugin(session: Session): CLIPlugin {
+    return typeof this._pluginResolver === 'function'
+      ? this._pluginResolver(session)
+      : this._pluginResolver;
   }
 
   async spawn(session: Session): Promise<void> {
@@ -34,7 +42,7 @@ export class IMWorkerManager {
 
     // Build command
     const bridgePath = `/tmp/mm-coder-mcp-bridge-${session.sessionId}.js`;
-    const { command, args } = this._plugin.buildIMWorkerCommand(session, bridgePath);
+    const { command, args } = this._resolvePlugin(session).buildIMWorkerCommand(session, bridgePath);
 
     // Spawn process
     const proc = spawn(command, args, {

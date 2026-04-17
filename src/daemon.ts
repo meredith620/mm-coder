@@ -4,9 +4,8 @@ import { AclManager } from './acl-manager.js';
 import { PersistenceStore } from './persistence.js';
 import { IMMessageDispatcher } from './im-message-dispatcher.js';
 import { IMWorkerManager } from './im-worker-manager.js';
-import { getMattermostCommandHelpText } from './plugins/im/mattermost.js';
-import { getIMPluginFactory } from './plugins/im/registry.js';
-import { getCLIPlugin } from './plugins/cli/registry.js';
+import { getIMPluginFactory, getDefaultIMPluginName } from './plugins/im/registry.js';
+import { getCLIPlugin, getDefaultCLIPluginName } from './plugins/cli/registry.js';
 import type { IMPlugin } from './plugins/types.js';
 import type { IncomingMessage, MessageTarget, Session } from './types.js';
 import type { AclAction, Actor } from './acl-manager.js';
@@ -20,6 +19,7 @@ export interface DaemonOptions {
   imConfigPath?: string;
   enableIM?: boolean;
   imPluginName?: string;
+  defaultCLIPluginName?: string;
 }
 
 export class Daemon {
@@ -28,85 +28,120 @@ export class Daemon {
   private _acl: AclManager;
   private _store: PersistenceStore | null;
   private _imPlugin: IMPlugin | null = null;
+  private _imPluginName: string | null = null;
+  private _imPlugins = new Map<string, IMPlugin>();
   private _imDispatcher: IMMessageDispatcher | null = null;
   private _imWorkerManager: IMWorkerManager | null = null;
+  private _defaultCLIPluginName: string;
 
   constructor(socketPath: string, opts: DaemonOptions = {}) {
     this._server = new IPCServer(socketPath);
     this._store = opts.persistencePath ? new PersistenceStore(opts.persistencePath) : null;
     this.registry = new SessionRegistry(this._store ?? undefined);
     this._acl = new AclManager();
+    this._defaultCLIPluginName = opts.defaultCLIPluginName ?? getDefaultCLIPluginName();
     this._registerHandlers();
 
     // Initialize IM if enabled
     if (opts.enableIM) {
-      void this._initializeIM(opts.imPluginName ?? 'mattermost', opts.imConfigPath);
+      const pluginNames = (opts.imPluginName ?? getDefaultIMPluginName())
+        .split(',')
+        .map(name => name.trim())
+        .filter(Boolean);
+      void this._initializeIMs(pluginNames, opts.imConfigPath);
     }
   }
 
-  private async _initializeIM(pluginName: string, configPath?: string): Promise<void> {
-    try {
-      const factory = getIMPluginFactory(pluginName);
-      const cfgPath = configPath ?? factory.getDefaultConfigPath();
+  private async _initializeIMs(pluginNames: string[], configPath?: string): Promise<void> {
+    const sessions = this.registry.list();
+    const activeCount = sessions.filter(s => s.status === 'attached' || s.status === 'im_processing').length;
 
-      this._imPlugin = await factory.load(cfgPath);
+    for (const pluginName of pluginNames) {
+      try {
+        const factory = getIMPluginFactory(pluginName);
+        const cfgPath = configPath ?? factory.getDefaultConfigPath();
+        const plugin = await factory.load(cfgPath, {
+          sessionCount: sessions.length,
+          activeCount,
+        });
 
-      // Register message handler
-      this._imPlugin.onMessage((msg) => {
-        // Use channelId from message, or empty string as fallback
-        void this._handleIncomingIMMessage(msg, msg.channelId ?? '');
-      });
+        plugin.onMessage((msg) => {
+          void this._handleIncomingIMMessage(msg, msg.channelId ?? '');
+        });
 
-      // Initialize CLI plugin via registry
-      const cliPlugin = getCLIPlugin('claude-code');
+        this._imPlugins.set(pluginName, plugin);
+        if (!this._imPlugin) {
+          this._imPlugin = plugin;
+          this._imPluginName = pluginName;
+        }
 
-      // Initialize worker manager
-      this._imWorkerManager = new IMWorkerManager(cliPlugin, this.registry);
-
-      // Initialize message dispatcher
-      this._imDispatcher = new IMMessageDispatcher({
-        registry: this.registry,
-        imPlugin: this._imPlugin,
-        imTarget: {
-          plugin: pluginName,
-          threadId: '',
-        },
-        cliPlugin,
-        pollIntervalMs: 500,
-      });
-
-      // Start dispatcher
-      this._imDispatcher.start();
-
-      console.log(`IM plugin '${pluginName}' connected and dispatcher started`);
-    } catch (err) {
-      console.error(`Failed to initialize IM: ${(err as Error).message}`);
+        console.log(`IM plugin '${pluginName}' connected`);
+      } catch (err) {
+        console.error(`Failed to initialize IM plugin '${pluginName}': ${(err as Error).message}`);
+      }
     }
+
+    if (this._imPlugins.size === 0) {
+      return;
+    }
+
+    this._imWorkerManager = new IMWorkerManager((session) => getCLIPlugin(session.cliPlugin), this.registry);
+
+    this._imDispatcher = new IMMessageDispatcher({
+      registry: this.registry,
+      imPlugin: this._imPlugin!,
+      imPluginResolver: (message) => this._getIMPluginOrThrow(message.plugin ?? this._imPluginName ?? getDefaultIMPluginName()),
+      imTarget: {
+        plugin: this._imPluginName ?? getDefaultIMPluginName(),
+        threadId: '',
+      },
+      cliPluginResolver: (session) => getCLIPlugin(session.cliPlugin),
+      pollIntervalMs: 500,
+    });
+
+    this._imDispatcher.start();
+    console.log(`IM dispatcher started for plugins: ${pluginNames.join(', ')}`);
+  }
+
+  private _getIMPlugin(pluginName: string): IMPlugin | null {
+    return this._imPlugins.get(pluginName)
+      ?? (pluginName === this._imPluginName ? this._imPlugin : null)
+      ?? (this._imPlugins.size === 1 ? [...this._imPlugins.values()][0] : null);
+  }
+
+  private _getIMPluginOrThrow(pluginName: string): IMPlugin {
+    const plugin = this._getIMPlugin(pluginName);
+    if (!plugin) {
+      throw new Error(`IM plugin not initialized: ${pluginName}`);
+    }
+    return plugin;
   }
 
   private async _handleIncomingIMMessage(msg: IncomingMessage, channelId: string): Promise<void> {
-    if (!this._imPlugin) return;
+    const imPlugin = this._getIMPlugin(msg.plugin);
+    if (!imPlugin) return;
 
     const trimmed = msg.text.trim();
+    const factory = getIMPluginFactory(msg.plugin);
 
     if (trimmed === '/help') {
-      await this._imPlugin.sendMessage(this._buildReplyTarget(msg, channelId), {
+      await imPlugin.sendMessage(this._buildReplyTarget(msg, channelId), {
         kind: 'text',
-        text: getMattermostCommandHelpText(),
+        text: factory.getCommandHelpText(),
       });
       return;
     }
 
     if (trimmed === '/list') {
-      await this._imPlugin.sendMessage(this._buildReplyTarget(msg, channelId), {
+      await imPlugin.sendMessage(this._buildReplyTarget(msg, channelId), {
         kind: 'text',
-        text: this._renderIMSessionList(),
+        text: this._renderIMSessionList(msg.plugin),
       });
       return;
     }
 
     if (trimmed === '/status') {
-      await this._imPlugin.sendMessage(this._buildReplyTarget(msg, channelId), {
+      await imPlugin.sendMessage(this._buildReplyTarget(msg, channelId), {
         kind: 'text',
         text: this._renderIMStatus(msg),
       });
@@ -122,7 +157,7 @@ export class Daemon {
     // C 类：IM 中不支持的命令（remove/attach/create 等）
     // 在 thread 中（isTopLevel=false）拦截，不落入 CLI
     if (!msg.isTopLevel && trimmed.startsWith('/')) {
-      await this._imPlugin.sendMessage(this._buildReplyTarget(msg, channelId), {
+      await imPlugin.sendMessage(this._buildReplyTarget(msg, channelId), {
         kind: 'text',
         text: `命令 \`${trimmed.split(' ')[0]}\` 不支持在 IM 中使用，请使用 mm-coder CLI。`,
       });
@@ -131,7 +166,7 @@ export class Daemon {
 
     // D 类：顶层 channel 消息中的未知命令
     if (msg.isTopLevel && trimmed.startsWith('/')) {
-      await this._imPlugin.sendMessage(this._buildReplyTarget(msg, channelId), {
+      await imPlugin.sendMessage(this._buildReplyTarget(msg, channelId), {
         kind: 'text',
         text: `未知命令 \`${trimmed.split(' ')[0]}\`。发送 \`/help\` 查看可用命令。`,
       });
@@ -145,6 +180,7 @@ export class Daemon {
         text: msg.text,
         dedupeKey: msg.dedupeKey,
         plugin: msg.plugin,
+        channelId: msg.channelId ?? channelId,
         threadId: msg.threadId,
         messageId: msg.messageId,
         userId: msg.userId,
@@ -172,19 +208,20 @@ export class Daemon {
     if (!msg.isTopLevel) {
       const session = this.registry.getByIMThread(msg.plugin, msg.threadId);
       if (session) {
-        return this._renderSessionStatus(session);
+        return this._renderSessionStatus(session, msg.plugin);
       }
     }
     // Global stats (top-level or unbound thread)
     return this._renderGlobalStatus(sessions);
   }
 
-  private _renderSessionStatus(session: Session): string {
-    const binding = session.imBindings[0];
+  private _renderSessionStatus(session: Session, pluginName: string): string {
+    const binding = session.imBindings.find((item) => item.plugin === pluginName) ?? session.imBindings[0];
     const pending = session.messageQueue.filter(m => m.status === 'pending').length;
     const lines = [
       `**会话：** \`${session.name}\``,
       `**状态：** ${session.status}`,
+      `**CLI 插件：** ${session.cliPlugin}`,
       `**工作目录：** ${session.workdir}`,
       `**绑定 thread：** ${binding?.threadId ?? '未绑定'}`,
       `**待处理消息：** ${pending}`,
@@ -213,7 +250,7 @@ export class Daemon {
     const name = this._makeSessionName(threadId);
     const session = this.registry.create(name, {
       workdir: process.cwd(),
-      cliPlugin: 'claude-code',
+      cliPlugin: this._defaultCLIPluginName,
     });
     this.registry.bindIM(name, { plugin, threadId });
     return session;
@@ -230,16 +267,16 @@ export class Daemon {
     return `${base}-${i}`;
   }
 
-  private _renderIMSessionList(): string {
+  private _renderIMSessionList(pluginName: string): string {
     const sessions = this.registry.list();
     if (sessions.length === 0) {
       return '当前没有 mm-coder 会话。直接发送一条消息即可创建新会话。';
     }
 
     const lines = sessions.map((session) => {
-      const binding = session.imBindings.find((item) => item.plugin === 'mattermost');
+      const binding = session.imBindings.find((item) => item.plugin === pluginName);
       const thread = binding ? binding.threadId : '未绑定';
-      return `- ${session.name} (${session.status}) thread=${thread}`;
+      return `- ${session.name} (${session.status}, cli=${session.cliPlugin}) thread=${thread}`;
     });
 
     return [
@@ -251,9 +288,10 @@ export class Daemon {
   }
 
   private async _handleOpenCommand(sessionName: string, channelId: string, msg: IncomingMessage): Promise<void> {
-    if (!this._imPlugin) return;
+    const imPlugin = this._getIMPlugin(msg.plugin);
+    if (!imPlugin) return;
     if (!sessionName) {
-      await this._imPlugin.sendMessage(this._buildReplyTarget(msg, channelId), {
+      await imPlugin.sendMessage(this._buildReplyTarget(msg, channelId), {
         kind: 'text',
         text: '用法：/open <sessionName>',
       });
@@ -263,27 +301,27 @@ export class Daemon {
     const session = this.registry.get(sessionName);
 
     if (!session) {
-      await this._imPlugin.sendMessage(this._buildReplyTarget(msg, channelId), {
+      await imPlugin.sendMessage(this._buildReplyTarget(msg, channelId), {
         kind: 'text',
         text: `未找到会话 ${sessionName}，请先使用 mm-coder create 创建。`,
       });
       return;
     }
 
-    const binding = session.imBindings.find((item) => item.plugin === 'mattermost');
+    const binding = session.imBindings.find((item) => item.plugin === msg.plugin);
 
     if (binding) {
       // 已有绑定：向目标 session 绑定 thread 发锚点 + 当前 thread 发确认
-      await this._imPlugin.sendMessage({
-        plugin: 'mattermost',
-        channelId,
+      await imPlugin.sendMessage({
+        plugin: msg.plugin,
+        channelId: binding.channelId ?? channelId,
         threadId: binding.threadId,
       }, {
         kind: 'text',
         text: `已定位到会话 ${sessionName}。请直接在这个 thread 中继续对话。`,
       });
 
-      await this._imPlugin.sendMessage(this._buildReplyTarget(msg, channelId), {
+      await imPlugin.sendMessage(this._buildReplyTarget(msg, channelId), {
         kind: 'text',
         text: `已在会话 ${sessionName} 的 thread 中发送定位消息。`,
       });
@@ -292,7 +330,7 @@ export class Daemon {
       // double-check：await 让出事件循环后可能已被其他请求绑定
       const recheckBinding = session.imBindings.find((item) => item.plugin === msg.plugin);
       if (recheckBinding) {
-        await this._imPlugin.sendMessage(this._buildReplyTarget(msg, channelId), {
+        await imPlugin.sendMessage(this._buildReplyTarget(msg, channelId), {
           kind: 'text',
           text: `会话 ${sessionName} 已被绑定到其他 thread。`,
         });
@@ -301,12 +339,12 @@ export class Daemon {
 
       let newThreadId: string;
       try {
-        newThreadId = await this._imPlugin.createLiveMessage(
-          { plugin: 'mattermost', channelId, threadId: '' },
+        newThreadId = await imPlugin.createLiveMessage(
+          { plugin: msg.plugin, channelId, threadId: '' },
           { kind: 'text', text: `[${sessionName} thread — 请在此继续对话]` },
         );
       } catch (err) {
-        await this._imPlugin.sendMessage(this._buildReplyTarget(msg, channelId), {
+        await imPlugin.sendMessage(this._buildReplyTarget(msg, channelId), {
           kind: 'text',
           text: `为 ${sessionName} 创建 thread 失败：${(err as Error).message}`,
         });
@@ -316,7 +354,7 @@ export class Daemon {
       // 再次检查：createLiveMessage 期间可能已被并发绑定
       const finalCheck = session.imBindings.find((item) => item.plugin === msg.plugin);
       if (finalCheck) {
-        await this._imPlugin.sendMessage(this._buildReplyTarget(msg, channelId), {
+        await imPlugin.sendMessage(this._buildReplyTarget(msg, channelId), {
           kind: 'text',
           text: `会话 ${sessionName} 已被绑定到其他 thread。`,
         });
@@ -329,7 +367,7 @@ export class Daemon {
         channelId,
       });
 
-      await this._imPlugin.sendMessage(this._buildReplyTarget(msg, channelId), {
+      await imPlugin.sendMessage(this._buildReplyTarget(msg, channelId), {
         kind: 'text',
         text: `已为会话 ${sessionName} 创建独立 thread。已在该 thread 发送定位消息，可直接开始对话。`,
       });
@@ -348,8 +386,12 @@ export class Daemon {
     if (this._imDispatcher) {
       this._imDispatcher.stop();
     }
-    if (this._imPlugin) {
-      await this._imPlugin.disconnect?.();
+    const plugins = new Set<IMPlugin>([
+      ...this._imPlugins.values(),
+      ...(this._imPlugin ? [this._imPlugin] : []),
+    ]);
+    for (const plugin of plugins) {
+      await plugin.disconnect?.();
     }
 
     // Stop daemon core

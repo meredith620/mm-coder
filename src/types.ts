@@ -36,6 +36,8 @@ export interface IMBinding {
 
 export interface QueuedMessage {
   messageId: string;
+  plugin?: string;
+  channelId?: string;
   threadId: string;
   userId: string;
   content: string;

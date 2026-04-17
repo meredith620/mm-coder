@@ -1,12 +1,12 @@
 # Plugin Development Guide
 
-mm-coder 支持两类插件：**CLI 插件**（coder 后端）和 **IM 插件**（消息平台）。
+mm-coder 支持两类插件：
+- **CLI 插件**：负责构造 attach / IM worker / 单条 IM 消息的命令
+- **IM 插件**：负责接收消息、发送消息、创建可更新消息、发审批请求
 
 ---
 
-## CLI 插件（Coder 后端）
-
-CLI 插件负责生成与 AI 编码助手（如 Claude Code）交互的命令。
+## CLI 插件
 
 ### 接口定义
 
@@ -24,81 +24,73 @@ export interface CLIPlugin {
 }
 ```
 
-### 实现示例
+### 当前参考实现
 
 参考 `src/plugins/cli/claude-code.ts`：
 
 ```typescript
-export const ClaudeCodePlugin: CLIPlugin = {
+export class ClaudeCodePlugin implements CLIPlugin {
   buildAttachCommand(session: Session): CommandSpec {
     return {
       command: 'claude',
-      args: [
-        '--dangerously-disable-permissions',
-        '--session-id', session.sessionId,
-      ],
+      args: ['--resume', session.sessionId],
     };
-  },
+  }
 
   buildIMWorkerCommand(session: Session, bridgeScriptPath: string): CommandSpec {
     return {
       command: 'claude',
       args: [
-        '--dangerously-disable-permissions',
-        '--session-id', session.sessionId,
-        '--mcp', bridgeScriptPath,
+        '-p',
+        '--resume', session.sessionId,
+        '--input-format', 'stream-json',
+        '--output-format', 'stream-json',
+        '--verbose',
+        '--permission-prompt-tool', `mcp__mm-coder-bridge__permission_prompt:${bridgeScriptPath}`,
       ],
     };
-  },
+  }
 
   buildIMMessageCommand(session: Session, prompt: string): CommandSpec {
     return {
       command: 'claude',
       args: [
-        '--dangerously-disable-permissions',
-        '--session-id', session.sessionId,
-        '--prompt', prompt,
+        '-p', prompt,
+        '--resume', session.sessionId,
+        '--output-format', 'stream-json',
       ],
     };
-  },
+  }
 
   generateSessionId(): string {
     return randomUUID();
-  },
-};
+  }
+}
 ```
 
-### 注册插件
+### 注册 CLI 插件
 
 在 `src/plugins/cli/registry.ts` 中注册：
 
 ```typescript
-import { MyCustomPlugin } from './my-custom.js';
-
-const CLI_PLUGINS: Record<string, CLIPlugin> = {
-  'claude-code': ClaudeCodePlugin,
-  'my-custom': MyCustomPlugin,  // 新增
+const CLI_PLUGINS: Record<string, () => CLIPlugin> = {
+  'claude-code': () => new ClaudeCodePlugin(),
+  'my-custom': () => new MyCustomPlugin(),
 };
-
-export function getCLIPlugin(name: string): CLIPlugin {
-  const plugin = CLI_PLUGINS[name];
-  if (!plugin) throw new Error(`Unknown CLI plugin: ${name}`);
-  return plugin;
-}
 ```
 
-### 使用插件
+如果要改默认 CLI 插件，同时更新 registry 中的默认插件常量。
 
-```bash
-# 创建 session 时指定 CLI 插件
-mm-coder create my-session --cli my-custom
-```
+### CLI 插件开发约束
+
+- `buildAttachCommand()` 必须返回可直接进入交互式会话的命令
+- `buildIMWorkerCommand()` 用于长驻 worker，不是单次 prompt 命令
+- `buildIMMessageCommand()` 用于 dispatcher 单条消息处理
+- 生成的命令必须只依赖 `Session` 中已有字段，不能假设额外全局状态
 
 ---
 
-## IM 插件（消息平台）
-
-IM 插件负责与消息平台（如 Mattermost、Discord）交互。
+## IM 插件
 
 ### 接口定义
 
@@ -113,25 +105,59 @@ export interface IMPlugin {
 }
 ```
 
-关键类型定义见 `src/types.ts`：
-- `IncomingMessage`：接收到的消息
-- `MessageTarget`：消息目标（channel/thread/user）
-- `MessageContent`：消息内容（text/markdown/file）
-- `ApprovalRequest`：审批请求
+### 当前参考实现
 
-### 实现要点
+参考 `src/plugins/im/mattermost.ts`：
+- WebSocket 收消息
+- REST API 发消息 / 更新消息
+- `IncomingMessage.plugin` 固定写入插件名（如 `mattermost`）
+- `threadId/channelId` 必须完整透传，供 daemon 做动态路由
 
-参考 `src/plugins/im/mattermost.ts` 的 `MattermostPlugin` 类：
+### IM 工厂接口
 
-1. **连接管理**：在构造函数或 `connect()` 中建立 WebSocket 连接
-2. **消息接收**：监听平台事件，转换为 `IncomingMessage` 并调用 `onMessage` 回调
-3. **消息发送**：实现 `sendMessage`、`createLiveMessage`、`updateMessage`
-4. **审批请求**：实现 `requestApproval` 发送交互式审批消息
-5. **资源清理**：实现 `disconnect()` 关闭连接
+`src/plugins/im/registry.ts` 中每个 IM 插件都通过工厂注册：
 
-### 配置格式
+```typescript
+export interface IMPluginFactory {
+  load(configPath: string, opts?: { sessionCount?: number; activeCount?: number }): Promise<IMPlugin>;
+  getDefaultConfigPath(): string;
+  writeConfigTemplate(configPath: string): void;
+  verifyConnection(configPath?: string): Promise<{ ok: true; config: unknown; botUserId: string }>;
+  getCommandHelpText(): string;
+}
+```
 
-IM 插件配置统一放在 `~/.mm-coder/config.json`，使用多 IM 格式：
+### 注册 IM 插件
+
+```typescript
+const IM_PLUGINS: Record<string, IMPluginFactory> = {
+  'mattermost': {
+    load: async (configPath, opts = {}) => createConnectedMattermostPlugin(configPath, opts),
+    getDefaultConfigPath: () => path.join(os.homedir(), '.mm-coder', 'config.json'),
+    writeConfigTemplate: writeMattermostConfigTemplate,
+    verifyConnection: verifyMattermostConnection,
+    getCommandHelpText: getMattermostCommandHelpText,
+  },
+  'discord': {
+    // ...
+  },
+};
+```
+
+如果要改默认 IM 插件，同时更新 registry 中的默认插件常量。
+
+### IM 插件开发约束
+
+- `IncomingMessage.plugin` 必须稳定标识当前 IM 插件名
+- `sendMessage()` / `createLiveMessage()` 必须尊重 `MessageTarget.threadId/channelId`
+- `getCommandHelpText()` 返回该 IM 插件环境下的 `/help` 文案
+- `disconnect()` 必须幂等，daemon 停止时会统一调用
+
+---
+
+## 配置格式
+
+当前推荐配置格式：
 
 ```json
 {
@@ -141,155 +167,77 @@ IM 插件配置统一放在 `~/.mm-coder/config.json`，使用多 IM 格式：
       "token": "your-bot-token",
       "channelId": "channel-id-here",
       "reconnectIntervalMs": 5000
-    },
-    "discord": {
-      "token": "your-discord-bot-token",
-      "guildId": "guild-id",
-      "channelId": "channel-id"
     }
   }
 }
 ```
 
-**向后兼容**：旧格式仍然支持：
-- `{ "mattermost": { ... } }` （分组格式）
-- `{ "url": "...", "token": "..." }` （扁平格式）
-
-### 插件工厂
-
-在 `src/plugins/im/registry.ts` 中注册插件工厂：
-
-```typescript
-export interface IMPluginFactory {
-  load(configPath: string): Promise<IMPlugin>;
-  getDefaultConfigPath(): string;
-  writeConfigTemplate(configPath: string): void;
-  verifyConnection(configPath?: string): Promise<{ ok: true; config: unknown; botUserId: string }>;
-}
-
-const IM_PLUGINS: Record<string, IMPluginFactory> = {
-  'mattermost': {
-    load: async (configPath: string) => {
-      const config = loadMattermostConfig(configPath);
-      return createConnectedMattermostPlugin(configPath, { sessionCount: 0, activeCount: 0 });
-    },
-    getDefaultConfigPath: () => path.join(os.homedir(), '.mm-coder', 'config.json'),
-    writeConfigTemplate: writeMattermostConfigTemplate,
-    verifyConnection: verifyMattermostConnection,
-  },
-  // 新增插件
-  'discord': { ... },
-};
-
-export function getIMPluginFactory(name: string): IMPluginFactory {
-  const factory = IM_PLUGINS[name];
-  if (!factory) throw new Error(`Unknown IM plugin: ${name}`);
-  return factory;
-}
-```
-
-### 使用插件
-
-```bash
-# 初始化配置
-mm-coder im init --plugin discord
-
-# 验证连接
-mm-coder im verify --plugin discord
-
-# 启动 daemon（默认使用 mattermost）
-mm-coder start
-```
+Mattermost 仍兼容旧格式：
+- `{ "mattermost": { ... } }`
+- `{ "url": "...", "token": "...", "channelId": "..." }`
 
 ---
 
-## 测试
+## 路由与调度约束
+
+当前实现已经是动态路由：
+
+1. daemon 根据 `IncomingMessage.plugin + threadId` 绑定 session
+2. daemon 在 `/help` `/list` `/status` `/open` 中按消息来源 plugin 选择 IM 插件
+3. dispatcher 按 `QueuedMessage.plugin/channelId/threadId` 决定回复目标
+4. dispatcher 按 `session.cliPlugin` 动态解析 CLI 插件
+5. IM worker manager 也按 `session.cliPlugin` 动态启动 worker
+
+因此新增插件时，最关键的是：
+- 写对 `IncomingMessage.plugin`
+- 保证 `MessageTarget` 能真实映射到平台线程/频道
+- 保证 CLI 插件命令与该 coder 的 resume 语义一致
+
+---
+
+## 测试建议
 
 ### CLI 插件测试
 
-创建 `tests/unit/my-cli-plugin.test.ts`：
+至少覆盖：
+- `buildAttachCommand()`
+- `buildIMWorkerCommand()`
+- `buildIMMessageCommand()`
+- `generateSessionId()`
 
-```typescript
-import { describe, test, expect } from 'vitest';
-import { MyCustomPlugin } from '../../src/plugins/cli/my-custom.js';
-
-describe('MyCustomPlugin', () => {
-  test('buildAttachCommand 返回正确命令', () => {
-    const session = { sessionId: 'test-123', name: 'test', workdir: '/tmp' };
-    const spec = MyCustomPlugin.buildAttachCommand(session);
-    expect(spec.command).toBe('my-coder');
-    expect(spec.args).toContain('test-123');
-  });
-
-  test('generateSessionId 返回唯一 ID', () => {
-    const id1 = MyCustomPlugin.generateSessionId();
-    const id2 = MyCustomPlugin.generateSessionId();
-    expect(id1).not.toBe(id2);
-  });
-});
-```
+参考：`tests/unit/claude-code-plugin.test.ts`
 
 ### IM 插件测试
 
-使用 `MockIMPlugin`（`tests/helpers/mock-im-plugin.ts`）进行集成测试：
+至少覆盖：
+- 配置加载
+- `onMessage()` 收到平台事件后能正确转换为 `IncomingMessage`
+- `sendMessage()` / `createLiveMessage()` / `updateMessage()`
+- `requestApproval()`
+- `disconnect()`
 
-```typescript
-import { MockIMPlugin } from '../helpers/mock-im-plugin.js';
+参考：`tests/unit/mattermost-plugin.test.ts`
 
-test('IM 消息流', async () => {
-  const plugin = new MockIMPlugin();
-  const received: IncomingMessage[] = [];
-  plugin.onMessage(msg => received.push(msg));
-  
-  plugin.simulateMessage({ threadId: 't1', userId: 'u1', text: 'hello' });
-  expect(received).toHaveLength(1);
-  expect(received[0].text).toBe('hello');
-});
+### 路由测试
+
+新增 IM/CLI 插件后，建议至少补跑：
+
+```bash
+npx vitest run \
+  tests/unit/cli-plugin-registry.test.ts \
+  tests/unit/im-plugin-registry.test.ts \
+  tests/integration/im-routing.test.ts \
+  tests/e2e/cli-e2e.test.ts
 ```
 
 ---
 
-## 架构概览
+## 参考文件
 
-```
-┌─────────────────────────────────────────────────────────┐
-│                        Daemon                           │
-│  ┌──────────────────────────────────────────────────┐   │
-│  │          SessionRegistry                         │   │
-│  │  - 管理所有 session 状态                         │   │
-│  │  - 消息队列                                      │   │
-│  └──────────────────────────────────────────────────┘   │
-│                                                          │
-│  ┌──────────────────┐        ┌──────────────────────┐   │
-│  │ IMMessageDispatcher│      │  IMWorkerManager     │   │
-│  │  - 轮询消息队列   │      │  - 管理 CLI 进程     │   │
-│  │  - 调用 CLI 插件  │      │  - 崩溃重启          │   │
-│  └──────────────────┘        └──────────────────────┘   │
-│           │                            │                 │
-│           ▼                            ▼                 │
-│  ┌──────────────────┐        ┌──────────────────────┐   │
-│  │    IM Plugin     │        │    CLI Plugin        │   │
-│  │  - Mattermost    │        │  - Claude Code       │   │
-│  │  - Discord       │        │  - Custom Coder      │   │
-│  └──────────────────┘        └──────────────────────┘   │
-└─────────────────────────────────────────────────────────┘
-```
-
-**消息流**：
-1. IM 平台 → `IMPlugin.onMessage` → `SessionRegistry.enqueueIMMessage`
-2. `IMMessageDispatcher` 轮询队列 → 调用 `CLIPlugin.buildIMMessageCommand`
-3. CLI 进程输出 → `StreamToIM` → `IMPlugin.sendMessage` → IM 平台
-
-**审批流**：
-1. CLI 进程 → MCP `can_use_tool` → `ApprovalHandler`
-2. `ApprovalHandler` → `IMPlugin.requestApproval` → IM 平台
-3. 用户审批 → `ApprovalManager.decide` → 返回 CLI 进程
-
----
-
-## 参考实现
-
-- **CLI 插件**：`src/plugins/cli/claude-code.ts`
-- **IM 插件**：`src/plugins/im/mattermost.ts`
-- **Mock 插件**：`tests/helpers/mock-cli-plugin.ts`, `tests/helpers/mock-im-plugin.ts`
-- **Registry**：`src/plugins/cli/registry.ts`, `src/plugins/im/registry.ts`
+- `src/plugins/types.ts`
+- `src/plugins/cli/registry.ts`
+- `src/plugins/cli/claude-code.ts`
+- `src/plugins/im/registry.ts`
+- `src/plugins/im/mattermost.ts`
+- `tests/helpers/mock-cli-plugin.ts`
+- `tests/helpers/mock-im-plugin.ts`
