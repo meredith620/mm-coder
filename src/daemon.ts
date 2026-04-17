@@ -34,6 +34,14 @@ export class Daemon {
   private _imWorkerManager: IMWorkerManager | null = null;
   private _defaultCLIPluginName: string;
 
+  private _debugLog(payload: Record<string, unknown>): void {
+    try {
+      console.log(JSON.stringify({ at: new Date().toISOString(), component: 'daemon', ...payload }));
+    } catch {
+      // ignore logging failure
+    }
+  }
+
   constructor(socketPath: string, opts: DaemonOptions = {}) {
     this._server = new IPCServer(socketPath);
     this._store = opts.persistencePath ? new PersistenceStore(opts.persistencePath) : null;
@@ -66,7 +74,9 @@ export class Daemon {
         });
 
         plugin.onMessage((msg) => {
-          void this._handleIncomingIMMessage(msg, msg.channelId ?? '');
+          this._handleIncomingIMMessage(msg, msg.channelId ?? '').catch((err) => {
+            console.error(`[IM] Unhandled error in message handler: ${(err as Error).message}`);
+          });
         });
 
         this._imPlugins.set(pluginName, plugin);
@@ -87,7 +97,7 @@ export class Daemon {
 
     this._imWorkerManager = new IMWorkerManager((session) => getCLIPlugin(session.cliPlugin), this.registry);
 
-    this._imDispatcher = new IMMessageDispatcher({
+      this._imDispatcher = new IMMessageDispatcher({
       registry: this.registry,
       imPlugin: this._imPlugin!,
       imPluginResolver: (message) => this._getIMPluginOrThrow(message.plugin ?? this._imPluginName ?? getDefaultIMPluginName()),
@@ -97,6 +107,15 @@ export class Daemon {
       },
       cliPluginResolver: (session) => getCLIPlugin(session.cliPlugin),
       pollIntervalMs: 500,
+      onSessionImDone: (sessionName) => {
+        this._debugLog({ event: 'im_session_done', sessionName, sessionStatus: this.registry.get(sessionName)?.status });
+        if (this._store) void this._store.flush();
+        this._server.pushEventToAttachWaiter(sessionName, {
+          type: 'event',
+          event: 'session_resume',
+          data: { name: sessionName },
+        });
+      },
     });
 
     this._imDispatcher.start();
@@ -106,7 +125,8 @@ export class Daemon {
   private _getIMPlugin(pluginName: string): IMPlugin | null {
     return this._imPlugins.get(pluginName)
       ?? (pluginName === this._imPluginName ? this._imPlugin : null)
-      ?? (this._imPlugins.size === 1 ? [...this._imPlugins.values()][0] : null);
+      ?? (this._imPlugins.size === 1 ? [...this._imPlugins.values()][0] : null)
+      ?? null;
   }
 
   private _getIMPluginOrThrow(pluginName: string): IMPlugin {
@@ -154,6 +174,18 @@ export class Daemon {
       return;
     }
 
+    if (trimmed === '/takeover' || trimmed.startsWith('/takeover ')) {
+      const sessionName = trimmed === '/takeover' ? '' : trimmed.slice('/takeover '.length).trim();
+      await this._handleTakeoverCommand(sessionName, channelId, msg, false);
+      return;
+    }
+
+    if (trimmed === '/takeover-force' || trimmed.startsWith('/takeover-force ')) {
+      const sessionName = trimmed === '/takeover-force' ? '' : trimmed.slice('/takeover-force '.length).trim();
+      await this._handleTakeoverCommand(sessionName, channelId, msg, true);
+      return;
+    }
+
     // C 类：IM 中不支持的命令（remove/attach/create 等）
     // 在 thread 中（isTopLevel=false）拦截，不落入 CLI
     if (!msg.isTopLevel && trimmed.startsWith('/')) {
@@ -175,6 +207,20 @@ export class Daemon {
 
     // E 类：普通文本消息，进入 Claude 处理流程
     const session = this._getOrCreateSessionForThread(msg.threadId, msg.plugin);
+    if (session.status === 'attached' || session.status === 'takeover_pending') {
+      await imPlugin.sendMessage(this._buildReplyTarget(msg, channelId), {
+        kind: 'text',
+        text: `当前会话 \`${session.name}\` 正在终端中使用，不接收 IM 消息。可使用 \`/takeover ${session.name}\` 请求接管。`,
+      });
+      this._debugLog({
+        event: 'im_message_rejected_attached',
+        sessionName: session.name,
+        sessionStatus: session.status,
+        threadId: msg.threadId,
+        messageId: msg.messageId,
+      });
+      return;
+    }
     try {
       this.registry.enqueueIMMessage(session.name, {
         text: msg.text,
@@ -185,6 +231,14 @@ export class Daemon {
         messageId: msg.messageId,
         userId: msg.userId,
         receivedAt: msg.createdAt,
+      });
+      this._debugLog({
+        event: 'im_message_enqueued',
+        sessionName: session.name,
+        sessionStatus: session.status,
+        threadId: msg.threadId,
+        channelId: msg.channelId ?? channelId,
+        messageId: msg.messageId,
       });
     } catch (err) {
       console.error(`Failed to enqueue IM message: ${(err as Error).message}`);
@@ -221,6 +275,7 @@ export class Daemon {
     const lines = [
       `**会话：** \`${session.name}\``,
       `**状态：** ${session.status}`,
+      `**运行态：** ${session.runtimeState ?? 'idle'}`,
       `**CLI 插件：** ${session.cliPlugin}`,
       `**工作目录：** ${session.workdir}`,
       `**绑定 thread：** ${binding?.threadId ?? '未绑定'}`,
@@ -287,9 +342,84 @@ export class Daemon {
     ].join('\n');
   }
 
-  private async _handleOpenCommand(sessionName: string, channelId: string, msg: IncomingMessage): Promise<void> {
+  private async _handleTakeoverCommand(sessionName: string, channelId: string, msg: IncomingMessage, force: boolean): Promise<void> {
     const imPlugin = this._getIMPlugin(msg.plugin);
     if (!imPlugin) return;
+
+    if (!sessionName) {
+      await imPlugin.sendMessage(this._buildReplyTarget(msg, channelId), {
+        kind: 'text',
+        text: force ? '用法：/takeover-force <sessionName>' : '用法：/takeover <sessionName>',
+      });
+      return;
+    }
+
+    const session = this.registry.get(sessionName);
+    if (!session) {
+      await imPlugin.sendMessage(this._buildReplyTarget(msg, channelId), {
+        kind: 'text',
+        text: `未找到会话 ${sessionName}。`,
+      });
+      return;
+    }
+
+    if (session.status !== 'attached' && session.status !== 'takeover_pending') {
+      await imPlugin.sendMessage(this._buildReplyTarget(msg, channelId), {
+        kind: 'text',
+        text: `会话 ${sessionName} 当前不在终端占用状态，无需接管。`,
+      });
+      return;
+    }
+
+    if (!force) {
+      if (session.status === 'attached') {
+        this.registry.requestTakeover(sessionName, msg.userId);
+        if (this._store) void this._store.flush();
+      }
+      await imPlugin.sendMessage(this._buildReplyTarget(msg, channelId), {
+        kind: 'text',
+        text: `已请求接管会话 ${sessionName}。请在终端退出 attach，或在终端执行 mm-coder takeover-cancel ${sessionName} 取消。若需立即接管，请使用 /takeover-force ${sessionName}。`,
+      });
+      this._debugLog({ event: 'takeover_requested', sessionName, requestedBy: msg.userId });
+      return;
+    }
+
+    if (session.attachedPid) {
+      try {
+        process.kill(session.attachedPid, 'SIGTERM');
+      } catch {
+        // ignore missing process; we still release session below
+      }
+    }
+    this.registry.completeTakeover(sessionName);
+    if (this._store) void this._store.flush();
+    this._server.pushEventToAttachWaiter(sessionName, {
+      type: 'event',
+      event: 'session_resume',
+      data: { name: sessionName },
+    });
+
+    await imPlugin.sendMessage(this._buildReplyTarget(msg, channelId), {
+      kind: 'text',
+      text: `已强制接管会话 ${sessionName}。现在可在当前 thread 中继续对话。`,
+    });
+    this._debugLog({ event: 'takeover_forced', sessionName, requestedBy: msg.userId });
+  }
+
+  private async _handleOpenCommand(sessionName: string, channelId: string, msg: IncomingMessage): Promise<void> {
+    this._debugLog({
+      event: 'open_command_received',
+      sessionName,
+      requestChannelId: channelId,
+      msgPlugin: msg.plugin,
+      msgThreadId: msg.threadId,
+      isTopLevel: msg.isTopLevel,
+    });
+    const imPlugin = this._getIMPlugin(msg.plugin);
+    if (!imPlugin) {
+      console.error(`[/open] IM plugin not found for: ${msg.plugin}`);
+      return;
+    }
     if (!sessionName) {
       await imPlugin.sendMessage(this._buildReplyTarget(msg, channelId), {
         kind: 'text',
@@ -309,69 +439,96 @@ export class Daemon {
     }
 
     const binding = session.imBindings.find((item) => item.plugin === msg.plugin);
+    this._debugLog({
+      event: 'open_binding_lookup',
+      sessionName,
+      foundBinding: !!binding,
+      bindingThreadId: binding?.threadId,
+      bindingChannelId: binding?.channelId,
+    });
 
     if (binding) {
-      // 已有绑定：向目标 session 绑定 thread 发锚点 + 当前 thread 发确认
-      await imPlugin.sendMessage({
-        plugin: msg.plugin,
-        channelId: binding.channelId ?? channelId,
-        threadId: binding.threadId,
-      }, {
-        kind: 'text',
-        text: `已定位到会话 ${sessionName}。请直接在这个 thread 中继续对话。`,
-      });
-
-      await imPlugin.sendMessage(this._buildReplyTarget(msg, channelId), {
-        kind: 'text',
-        text: `已在会话 ${sessionName} 的 thread 中发送定位消息。`,
-      });
-    } else {
-      // 无绑定：为 session 创建新 thread（发 root post），绑定后回复
-      // double-check：await 让出事件循环后可能已被其他请求绑定
-      const recheckBinding = session.imBindings.find((item) => item.plugin === msg.plugin);
-      if (recheckBinding) {
-        await imPlugin.sendMessage(this._buildReplyTarget(msg, channelId), {
-          kind: 'text',
-          text: `会话 ${sessionName} 已被绑定到其他 thread。`,
-        });
-        return;
-      }
-
-      let newThreadId: string;
+      // 已有绑定：尝试向目标 thread 发锚点
       try {
-        newThreadId = await imPlugin.createLiveMessage(
-          { plugin: msg.plugin, channelId, threadId: '' },
-          { kind: 'text', text: `[${sessionName} thread — 请在此继续对话]` },
-        );
+        await imPlugin.sendMessage({
+          plugin: msg.plugin,
+          channelId: binding.channelId ?? channelId,
+          threadId: binding.threadId,
+        }, {
+          kind: 'text',
+          text: `已定位到会话 ${sessionName}。请直接在这个 thread 中继续对话。`,
+        });
+
+        await imPlugin.sendMessage(this._buildReplyTarget(msg, channelId), {
+          kind: 'text',
+          text: `已在会话 ${sessionName} 的 thread 中发送定位消息。`,
+        });
+        return;
       } catch (err) {
-        await imPlugin.sendMessage(this._buildReplyTarget(msg, channelId), {
-          kind: 'text',
-          text: `为 ${sessionName} 创建 thread 失败：${(err as Error).message}`,
-        });
-        return;
+        // 旧 thread 可能已不存在，移除旧绑定，走下面的创建新 thread 流程
+        console.error(`[/open] Failed to send to existing thread ${binding.threadId}, removing stale binding: ${(err as Error).message}`);
+        const idx = session.imBindings.indexOf(binding);
+        if (idx >= 0) session.imBindings.splice(idx, 1);
+        if (this._store) void this._store.flush();
       }
+    }
 
-      // 再次检查：createLiveMessage 期间可能已被并发绑定
-      const finalCheck = session.imBindings.find((item) => item.plugin === msg.plugin);
-      if (finalCheck) {
-        await imPlugin.sendMessage(this._buildReplyTarget(msg, channelId), {
-          kind: 'text',
-          text: `会话 ${sessionName} 已被绑定到其他 thread。`,
-        });
-        return;
-      }
-
-      this.registry.bindIM(sessionName, {
-        plugin: msg.plugin,
-        threadId: newThreadId,
-        channelId,
-      });
-
+    // 无绑定（或旧绑定已失效）：为 session 创建新 thread
+    const recheckBinding = session.imBindings.find((item) => item.plugin === msg.plugin);
+    if (recheckBinding) {
       await imPlugin.sendMessage(this._buildReplyTarget(msg, channelId), {
         kind: 'text',
-        text: `已为会话 ${sessionName} 创建独立 thread。已在该 thread 发送定位消息，可直接开始对话。`,
+        text: `会话 ${sessionName} 已被绑定到其他 thread。`,
       });
+      return;
     }
+
+    let newThreadId: string;
+    try {
+      newThreadId = await imPlugin.createLiveMessage(
+        { plugin: msg.plugin, channelId, threadId: '' },
+        { kind: 'text', text: `[${sessionName} thread — 请在此继续对话]` },
+      );
+      this._debugLog({ event: 'open_thread_created', sessionName, newThreadId, channelId });
+    } catch (err) {
+      console.error(`[/open] createLiveMessage failed: ${(err as Error).message}`);
+      await imPlugin.sendMessage(this._buildReplyTarget(msg, channelId), {
+        kind: 'text',
+        text: `为 ${sessionName} 创建 thread 失败：${(err as Error).message}`,
+      });
+      return;
+    }
+
+    const finalCheck = session.imBindings.find((item) => item.plugin === msg.plugin);
+    if (finalCheck) {
+      await imPlugin.sendMessage(this._buildReplyTarget(msg, channelId), {
+        kind: 'text',
+        text: `会话 ${sessionName} 已被绑定到其他 thread。`,
+      });
+      return;
+    }
+
+    this.registry.bindIM(sessionName, {
+      plugin: msg.plugin,
+      threadId: newThreadId,
+      channelId,
+    });
+    this._debugLog({ event: 'open_binding_created', sessionName, threadId: newThreadId, channelId });
+    if (this._store) void this._store.flush();
+
+    await imPlugin.sendMessage({
+      plugin: msg.plugin,
+      channelId,
+      threadId: newThreadId,
+    }, {
+      kind: 'text',
+      text: `已定位到会话 ${sessionName}。请直接在这个 thread 中继续对话。`,
+    });
+
+    await imPlugin.sendMessage(this._buildReplyTarget(msg, channelId), {
+      kind: 'text',
+      text: `已为会话 ${sessionName} 创建独立 thread。已在该 thread 发送定位消息，可直接开始对话。`,
+    });
   }
 
   async start(): Promise<void> {
@@ -473,13 +630,17 @@ export class Daemon {
 
       // Allow markDetached from 'attached' or 'recovering' (daemon restarted while attached).
       // Also tolerate sessions stuck in 'attach_pending' when the CLI process itself crashed.
-      const allowedStates = new Set(['attached', 'attach_pending', 'recovering']);
+      const allowedStates = new Set(['attached', 'attach_pending', 'recovering', 'takeover_pending']);
       if (!allowedStates.has(session.status)) {
         // Already in a stable state (idle/error/im_processing) — this is a stale call; ignore.
         return {};
       }
 
-      this.registry.markDetached(name, exitReason);
+      if (session.status === 'takeover_pending') {
+        this.registry.completeTakeover(name);
+      } else {
+        this.registry.markDetached(name, exitReason);
+      }
       if (this._store) void this._store.flush();
 
       // Push session_resume for any waiting attach waiter
@@ -531,6 +692,51 @@ export class Daemon {
       return { session: this._serializeSession(updated) };
     });
 
+    this._server.handle('updateSessionId', async (args) => {
+      const name = args['name'] as string;
+      const sessionId = args['sessionId'] as string;
+
+      const session = this.registry.get(name);
+      if (!session) {
+        const e = new Error(`Session not found: ${name}`) as Error & { code: ErrorCode };
+        e.code = 'SESSION_NOT_FOUND';
+        throw e;
+      }
+
+      this.registry.updateSessionId(name, sessionId);
+      if (this._store) void this._store.flush();
+
+      return { session: this._serializeSession(this.registry.get(name)!) };
+    });
+
+    this._server.handle('takeoverStatus', async (args) => {
+      const name = args['name'] as string;
+      const session = this.registry.get(name);
+      if (!session) {
+        const e = new Error(`Session not found: ${name}`) as Error & { code: ErrorCode };
+        e.code = 'SESSION_NOT_FOUND';
+        throw e;
+      }
+      return {
+        session: this._serializeSession(session),
+        takeoverRequestedBy: session.takeoverRequestedBy,
+        takeoverRequestedAt: session.takeoverRequestedAt,
+      };
+    });
+
+    this._server.handle('takeoverCancel', async (args) => {
+      const name = args['name'] as string;
+      const session = this.registry.get(name);
+      if (!session) {
+        const e = new Error(`Session not found: ${name}`) as Error & { code: ErrorCode };
+        e.code = 'SESSION_NOT_FOUND';
+        throw e;
+      }
+      this.registry.cancelTakeover(name);
+      if (this._store) void this._store.flush();
+      return { session: this._serializeSession(this.registry.get(name)!) };
+    });
+
     this._server.handle('import', async (args, actor) => {
       const sessionId = args['sessionId'] as string;
       const workdir = args['workdir'] as string;
@@ -567,7 +773,9 @@ export class Daemon {
       name: s.name,
       sessionId: s.sessionId,
       status: s.status,
+      runtimeState: s.runtimeState,
       lifecycleStatus: s.lifecycleStatus,
+      initState: s.initState,
       workdir: s.workdir,
       cliPlugin: s.cliPlugin,
       createdAt: s.createdAt,

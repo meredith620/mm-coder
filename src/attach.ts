@@ -1,5 +1,8 @@
 import { spawn } from 'child_process';
+import * as fs from 'fs';
 import * as net from 'net';
+import * as os from 'os';
+import * as path from 'path';
 import * as readline from 'readline';
 import { encodeRequest, encodeResponse, decodeMessage } from './ipc/codec.js';
 
@@ -8,13 +11,24 @@ export interface AttachOptions {
   sessionName: string;
   cliCommand: string;
   cliArgs: string[];
+  workdir?: string;
+}
+
+function appendAttachLog(payload: Record<string, unknown>): void {
+  try {
+    const logPath = process.env.MM_CODER_ATTACH_LOG ?? path.join(os.homedir(), '.mm-coder', 'attach.log');
+    fs.mkdirSync(path.dirname(logPath), { recursive: true });
+    fs.appendFileSync(logPath, `${JSON.stringify({ at: new Date().toISOString(), ...payload })}\n`, 'utf-8');
+  } catch {
+    // ignore logging errors
+  }
 }
 
 /**
  * Attach to a session: notify daemon, wait if IM is processing, spawn CLI, then notify detach.
  */
 export async function attachSession(opts: AttachOptions): Promise<void> {
-  const { socketPath, sessionName, cliCommand, cliArgs } = opts;
+  const { socketPath, sessionName, cliCommand, cliArgs, workdir } = opts;
 
   // Connect to daemon
   const socket = await new Promise<net.Socket>((resolve, reject) => {
@@ -63,8 +77,10 @@ export async function attachSession(opts: AttachOptions): Promise<void> {
   }
 
   try {
+    appendAttachLog({ event: 'attach_start', sessionName, cliCommand, cliArgs, workdir, currentCwd: process.cwd() });
     // Send attach command
     const attachResult = await sendRequest('attach', { name: sessionName, pid: process.pid });
+    appendAttachLog({ event: 'attach_ack', sessionName, attachResult });
 
     // If waitRequired, wait for resume event
     if (attachResult.waitRequired) {
@@ -73,10 +89,15 @@ export async function attachSession(opts: AttachOptions): Promise<void> {
 
     // Spawn CLI
     const exitCode = await new Promise<number>((resolve) => {
-      const proc = spawn(cliCommand, cliArgs, { stdio: 'inherit' });
+      const proc = spawn(cliCommand, cliArgs, {
+        stdio: 'inherit',
+        ...(workdir ? { cwd: workdir } : {}),
+      });
+      appendAttachLog({ event: 'spawned', sessionName, pid: proc.pid, cliCommand, cliArgs, workdir });
       proc.on('close', (code) => resolve(code ?? 0));
       proc.on('error', () => resolve(1));
     });
+    appendAttachLog({ event: 'attach_exit', sessionName, exitCode });
 
     // Notify daemon of detach
     await sendRequest('markDetached', {

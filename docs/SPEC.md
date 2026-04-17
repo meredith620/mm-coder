@@ -45,9 +45,10 @@ $ mm-coder attach bug-fix                       # 再次启动 Claude Code，自
 
 终端和 IM 使用不同的交互通道访问同一个 AI CLI 会话：
 
-- **终端**：直接运行 AI CLI 命令（如 `claude --resume <id>`），用户看到的就是原生 Claude Code，没有任何代理层
-- **IM**：Daemon 为每个 session 维护一个**长驻**的 `claude -p --input-format stream-json --output-format stream-json` 进程，通过 stdin 写入消息、从 stdout 读取事件流；权限审批通过 `--permission-prompt-tool` 路由到 daemon MCP server（`can_use_tool`），由 daemon 异步返回 allow/deny
-- **互斥**：同一 session 同一时刻只有一端在操作。终端在用时 IM 提示"会话正在终端使用中"
+- **终端**：直接运行 AI CLI 命令（如 `claude --resume <id>` 或 `claude --session-id <id>`），用户看到的就是原生 Claude Code，没有任何代理层
+- **IM**：Daemon 按消息粒度启动 `claude -p --output-format stream-json --verbose` 处理单轮请求，读取 stdout 事件流并回传到对应 thread
+- **互斥**：同一 session 同一时刻只允许一个控制端。终端 attach 时，IM 普通消息直接拒绝；用户可通过 takeover 请求或强制接管
+- **版本信息**：build 时写入静态版本与 git hash，运行时不执行 git 命令
 
 ### 2.2 会话生命周期原则
 
@@ -120,31 +121,19 @@ $ mm-coder attach bug-fix                       # 再次启动 Claude Code，自
 
 IM 交互:
   用户在 Mattermost thread 中发消息
-    用户在 Mattermost thread 中发消息
     → IM Plugin 收到消息，根据 threadId 查找关联 session
     → Daemon 检查 session 状态
     → 如果 attached:
-       → 在 thread 中提示"会话正在终端使用中，是否接管？"
-       → 接管策略默认 **硬接管**（立即 SIGTERM）；可选策略 **软接管**（先通知终端并给 30s 宽限期，再 SIGTERM）
-       → 用户选择接管 → session 进入 takeover_pending
-       → Daemon 向终端 claude 进程发送 SIGTERM
-       → Claude Code 优雅退出（session 状态自动保存）
-       → session 变为 idle，继续处理 IM 消息
-       → 用户选择不接管 → 消息排队等待
-    → 如果 idle（IM worker 已在后台常驻）:
+       → 普通文本消息直接拒绝，不入队，并提示 `/takeover <name>`
+       → 用户执行 `/takeover <name>` → session 进入 takeover_pending，等待终端释放
+       → 用户执行 `/takeover-force <name>` → daemon 终止终端 attach 对应 claude 进程，session 立即释放给 IM
+       → 终端也可执行 `mm-coder takeover-cancel <name>` 取消接管请求
+    → 如果 idle:
        → session 进入 im_processing
-       → 通过 IM worker 的 stdin.write 投递消息（JSON 格式）
-       → 从 IM worker stdout 流式读取 CLIEvent
-       → 若出现权限审批请求（通过 permission-prompt-tool → daemon MCP server）:
-          → session 进入 approval_pending
-          → daemon 向 IM 发送带 requestId 的审批请求
-          → 用户审批后，daemon MCP server 返回 allow/deny，session 回到 im_processing
-       → 发送格式化结果到对应 thread
-       → session 变回 idle，IM worker 保持存活等待下条消息
-    → 如果 idle（IM worker 尚未启动，首条消息触发懒启动）:
-       → 向 IM 回复"正在启动 Claude Code，请稍候..."
-       → spawn IM worker：claude -p --input-format stream-json --output-format stream-json --verbose --resume <id>
-       → 后续同 idle 流程（spawn 命令含 `--permission-prompt-tool "node /tmp/mm-coder-mcp-bridge-<id>.js"`）
+       → spawn `claude -p <prompt> --output-format stream-json --verbose`
+       → 读取 stdout 事件流并回传到对应 thread
+       → 若出现权限审批请求：session 进入 approval_pending，等待 IM 审批完成后继续
+       → 本轮 `claude -p` 退出后，session 回到 idle
 ```
 
 ### 2.4 IM 消息路由
@@ -164,8 +153,10 @@ Thread（每个 session 一个） → 会话交互
 ### 2.5 并发模型
 
 - 同一 session 的 IM 消息串行处理（队列），前一条处理完才处理下一条
-- **不同 session 之间完全并行** — 多个 thread 可同时与各自的 session 交互
-- 终端和 IM 互斥：attach 时 IM 可选择接管（SIGTERM 终止终端进程）或排队等待
+- **不同 session 之间完全并行**
+- **终端优先**：session 为 `attached` 或 `takeover_pending` 时，IM 普通消息直接拒绝，不入队
+- **接管**：IM 可通过 `/takeover <name>` 请求终端让出控制；`/takeover-force <name>` 可强制接管
+- **运行态**：`idle` / `running` / `waiting_approval` / `attached_terminal` / `takeover_pending`
 
 ### 2.7 Mattermost 配置加载与连接验证
 
@@ -252,13 +243,12 @@ class SessionRegistry {
   markDetached(name: string, reason?: Session['lastExitReason']): void;
   markImProcessing(name: string, pid: number): void;
   markRecovering(name: string): void;
-  takeover(name: string): void;  // 向终端 claude 进程发 SIGTERM，强制释放 session
+  requestTakeover(name: string, requestedBy?: string): void;
+  cancelTakeover(name: string): void;
+  completeTakeover(name: string): void;
 
   bindIM(name: string, binding: IMBinding): void;
   getByIMThread(pluginName: string, threadId: string): Session | undefined;
-
-  validateAttachedPid(name: string, expectedParentPid?: number): boolean;
-  validateImWorkerPid(name: string): boolean;
 }
 ```
 

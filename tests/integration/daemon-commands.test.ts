@@ -96,3 +96,26 @@ describe('ACL enforcement', () => {
     expect('ACL_DENIED').not.toBe('SESSION_BUSY');
   });
 });
+
+describe('takeover commands', () => {
+  test('takeoverStatus 返回接管请求信息', async () => {
+    await client.send('create', { name: 'takeover-test', workdir: '/tmp', cli: 'claude-code' });
+    await client.send('attach', { name: 'takeover-test', pid: 9999 });
+    daemon.registry.requestTakeover('takeover-test', 'user-im');
+
+    const res = await client.send('takeoverStatus', { name: 'takeover-test' });
+    expect(res.ok).toBe(true);
+    expect(res.data!.takeoverRequestedBy).toBe('user-im');
+    expect((res.data!.session as any).status).toBe('takeover_pending');
+  });
+
+  test('takeoverCancel 撤销接管请求并恢复 attached', async () => {
+    await client.send('create', { name: 'takeover-test2', workdir: '/tmp', cli: 'claude-code' });
+    await client.send('attach', { name: 'takeover-test2', pid: 9999 });
+    daemon.registry.requestTakeover('takeover-test2', 'user-im');
+
+    const res = await client.send('takeoverCancel', { name: 'takeover-test2' });
+    expect(res.ok).toBe(true);
+    expect((res.data!.session as any).status).toBe('attached');
+  });
+});

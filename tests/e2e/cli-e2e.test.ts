@@ -1,4 +1,4 @@
-import { describe, test, expect, beforeAll, afterAll } from 'vitest';
+import { describe, test, expect, beforeAll, afterAll, vi } from 'vitest';
 import { spawn, execFileSync } from 'child_process';
 import * as fs from 'fs';
 import * as os from 'os';
@@ -112,6 +112,34 @@ describe('mm-coder CLI E2E', () => {
     expect(stdout).toContain('bug-fix');
   });
 
+  test('非 git 目录也能正常执行 list', async () => {
+    const outsideDir = fs.mkdtempSync(path.join(os.tmpdir(), 'mm-cli-outside-'));
+    const originalCwd = process.cwd();
+    process.chdir(outsideDir);
+    try {
+      const { code, stderr } = await runCLIWithSocket(['list'], socketPath, pidFile);
+      expect(code).toBe(0);
+      expect(stderr).toBe('');
+    } finally {
+      process.chdir(originalCwd);
+      fs.rmSync(outsideDir, { recursive: true, force: true });
+    }
+  });
+
+  test('takeover-status 和 takeover-cancel 命令可用', async () => {
+    await client.send('create', { name: 'take-cli', workdir: tmpDir, cli: 'claude-code' });
+    await client.send('attach', { name: 'take-cli', pid: 1001 });
+    (daemon.registry as any).requestTakeover('take-cli', 'user-im');
+
+    const statusResult = await runCLIWithSocket(['takeover-status', 'take-cli'], socketPath, pidFile);
+    expect(statusResult.code).toBe(0);
+    expect(statusResult.stdout).toContain('takeover_pending');
+
+    const cancelResult = await runCLIWithSocket(['takeover-cancel', 'take-cli'], socketPath, pidFile);
+    expect(cancelResult.code).toBe(0);
+    expect(cancelResult.stdout).toContain("Takeover for 'take-cli' cancelled");
+  });
+
   test('status 显示 daemon PID 和 session 列表', async () => {
     const { stdout, code } = await runCLIWithSocket(['status'], socketPath, pidFile);
     expect(code).toBe(0);
@@ -126,7 +154,18 @@ describe('mm-coder CLI E2E', () => {
     expect(stdout).toContain('idle');
   });
 
+  test('diagnose bug-fix 输出本地 Claude session 诊断信息', async () => {
+    const { stdout, code } = await runCLIWithSocket(['diagnose', 'bug-fix'], socketPath, pidFile);
+    expect(code).toBe(0);
+    const data = JSON.parse(stdout);
+    expect(data.name).toBe('bug-fix');
+    expect(typeof data.localClaudeSessionPath).toBe('string');
+    expect(typeof data.localClaudeSessionExists).toBe('boolean');
+    expect(['--resume', '--session-id']).toContain(data.nextAttachMode);
+  });
+
   test('attach bug-fix 调用真实 CLI attach 路径并在退出后 session 回到 idle', async () => {
+
     const fakeBin = path.join(tmpDir, 'bin');
     fs.mkdirSync(fakeBin, { recursive: true });
     const argsFile = path.join(tmpDir, 'claude-args.txt');
@@ -149,11 +188,40 @@ describe('mm-coder CLI E2E', () => {
     expect(stderr).toBe('');
 
     const recordedArgs = fs.readFileSync(argsFile, 'utf8').trim().split('\n').filter(Boolean);
-    expect(recordedArgs).toContain('--resume');
+    expect(recordedArgs.some(arg => arg === '--session-id' || arg === '--resume')).toBe(true);
     expect(recordedArgs).toContain(String(session!.sessionId));
 
     const updated = daemon.registry.get('bug-fix')!;
     expect(updated.status).toBe('idle');
+  });
+
+  test('takeover-status 和 takeover-cancel 命令可用', async () => {
+    await client.send('create', { name: 'take-cli', workdir: tmpDir, cli: 'claude-code' });
+    await client.send('attach', { name: 'take-cli', pid: 1001 });
+    (daemon.registry as any).requestTakeover('take-cli', 'user-im');
+
+    const statusResult = await runCLIWithSocket(['takeover-status', 'take-cli'], socketPath, pidFile);
+    expect(statusResult.code).toBe(0);
+    expect(statusResult.stdout).toContain('takeover_pending');
+
+    const cancelResult = await runCLIWithSocket(['takeover-cancel', 'take-cli'], socketPath, pidFile);
+    expect(cancelResult.code).toBe(0);
+    expect(cancelResult.stdout).toContain("Takeover for 'take-cli' cancelled");
+  });
+
+  test('--version 在非 git 目录不崩溃', async () => {
+    const outsideDir = fs.mkdtempSync(path.join(os.tmpdir(), 'mm-cli-version-outside-'));
+    const originalCwd = process.cwd();
+    process.chdir(outsideDir);
+    try {
+      const { code, stdout, stderr } = await runCLI(['--version'], { socketPath, pidFile });
+      expect(code).toBe(0);
+      expect(stdout).toContain('mm-coder 0.1.0');
+      expect(stderr).toBe('');
+    } finally {
+      process.chdir(originalCwd);
+      fs.rmSync(outsideDir, { recursive: true, force: true });
+    }
   });
 
   test('remove bug-fix 删除 session', async () => {

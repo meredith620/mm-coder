@@ -5,17 +5,18 @@ const DEBOUNCE_MS = 500;
 
 interface AssistantEvent {
   type: 'assistant';
-  payload: { message: { content: Array<{ type: string; text?: string }> } };
+  payload?: { message?: { content?: Array<{ type: string; text?: string }> } };
+  message?: { content?: Array<{ type: string; text?: string }> };
 }
 
 interface ResultEvent {
   type: 'result';
-  payload: { subtype: string; result?: string };
+  payload?: { subtype?: string; result?: string };
 }
 
 interface ErrorEvent {
   type: 'error';
-  payload: { message: string };
+  payload?: { message?: string };
 }
 
 type StreamEvent = AssistantEvent | ResultEvent | ErrorEvent | { type: string; payload: unknown };
@@ -35,10 +36,13 @@ export class StreamToIM {
   async onEvent(event: StreamEvent): Promise<void> {
     if (event.type === 'assistant') {
       const e = event as AssistantEvent;
-      const text = e.payload.message.content
+      const content = e.payload?.message?.content ?? e.message?.content ?? [];
+      const text = content
         .filter(c => c.type === 'text')
         .map(c => c.text ?? '')
         .join('');
+
+      if (!text) return;
 
       if (!this._messageId) {
         this._messageId = await this._plugin.createLiveMessage(this._target, { kind: 'text', text });

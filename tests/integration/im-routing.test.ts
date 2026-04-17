@@ -86,6 +86,7 @@ describe('Daemon IM 路由', () => {
     const text = (mockIM.sent[0].content as any).text as string;
     expect(text).toContain('/list');
     expect(text).toContain('/open <sessionName>');
+    expect(text).toContain('/takeover <sessionName>');
   });
 
   test('/list 按当前 plugin 展示绑定 thread 和 cli', async () => {
@@ -121,14 +122,17 @@ describe('Daemon IM 路由', () => {
     const newThreadId = [...mockIM.liveMessageTargets.keys()][0];
     const liveTarget = mockIM.liveMessageTargets.get(newThreadId)!;
     expect(liveTarget.threadId).toBe('');
+    expect(liveTarget.channelId).toBe('ch1');
 
     const binding = daemon.registry.get('demo')!.imBindings.find((item: any) => item.plugin === 'mattermost');
     expect(binding?.threadId).toBe(newThreadId);
     expect(binding?.channelId).toBe('ch1');
 
-    expect(mockIM.sent).toHaveLength(1);
-    expect(mockIM.sent[0].target.threadId).toBe('');
-    expect((mockIM.sent[0].content as any).text).toContain('创建独立 thread');
+    expect(mockIM.sent).toHaveLength(2);
+    expect(mockIM.sent[0].target.threadId).toBe(newThreadId);
+    expect((mockIM.sent[0].content as any).text).toContain('已定位到会话 demo');
+    expect(mockIM.sent[1].target.threadId).toBe('');
+    expect((mockIM.sent[1].content as any).text).toContain('创建独立 thread');
   });
 
   test('/open <sessionName> 在顶层消息中对已绑定 session 发送锚点', async () => {
@@ -167,6 +171,35 @@ describe('Daemon IM 路由', () => {
 
     const ack = mockIM.sent.find(s => s.target.threadId === 'requester-thread');
     expect(ack).toBeTruthy();
+  });
+
+  test('/open <sessionName> 已有失效绑定时移除旧绑定并创建新 thread', async () => {
+    const mockIM = new MockIMPlugin();
+    let sendCalls = 0;
+    const originalSend = mockIM.sendMessage.bind(mockIM);
+    mockIM.sendMessage = async (target, content) => {
+      sendCalls += 1;
+      if (sendCalls === 1 && target.threadId === 'stale-thread') {
+        throw new Error('thread not found');
+      }
+      return originalSend(target, content);
+    };
+    (daemon as any)._imPlugin = mockIM;
+    (daemon as any)._imPluginName = 'mattermost';
+
+    daemon.registry.create('demo', { workdir: '/tmp', cliPlugin: 'claude-code' });
+    daemon.registry.bindIM('demo', { plugin: 'mattermost', threadId: 'stale-thread', channelId: 'old-ch' });
+
+    const msg = makeMsg({ text: '/open demo', threadId: 'root-post-1', isTopLevel: true });
+    await (daemon as any)._handleIncomingIMMessage(msg, 'ch1');
+
+    const bindings = daemon.registry.get('demo')!.imBindings.filter((item: any) => item.plugin === 'mattermost');
+    expect(bindings).toHaveLength(1);
+    expect(bindings[0].threadId).not.toBe('stale-thread');
+    expect(bindings[0].channelId).toBe('ch1');
+    expect(mockIM.liveMessageTargets.size).toBe(1);
+    expect(mockIM.sent.at(-1)?.target.threadId).toBe('');
+    expect(mockIM.sent.some(s => s.target.threadId === bindings[0].threadId && (s.content as any).text.includes('已定位到会话 demo'))).toBe(true);
   });
 
   test('/open <sessionName> 创建 thread 失败时不写入绑定', async () => {
@@ -217,6 +250,54 @@ describe('Daemon IM 路由', () => {
     expect(bindings).toHaveLength(1);
     expect(calls).toBe(2);
     expect(mockIM.sent.some(s => (s.content as any).text.includes('已被绑定到其他 thread'))).toBe(true);
+  });
+
+  test('attached 状态下普通消息直接拒绝且不入队', async () => {
+    const mockIM = new MockIMPlugin();
+    (daemon as any)._imPlugin = mockIM;
+    (daemon as any)._imPluginName = 'mattermost';
+
+    daemon.registry.create('demo-attached', { workdir: '/tmp', cliPlugin: 'claude-code' });
+    daemon.registry.markAttached('demo-attached', 1234);
+    daemon.registry.bindIM('demo-attached', { plugin: 'mattermost', threadId: 'thread-attached', channelId: 'ch1' });
+
+    const msg = makeMsg({ text: 'hello attached', threadId: 'thread-attached', isTopLevel: false });
+    await (daemon as any)._handleIncomingIMMessage(msg, 'ch1');
+
+    expect(mockIM.sent).toHaveLength(1);
+    expect((mockIM.sent[0].content as any).text).toContain('当前会话 `demo-attached` 正在终端中使用');
+    expect((mockIM.sent[0].content as any).text).toContain('/takeover demo-attached');
+    expect(daemon.registry.get('demo-attached')?.messageQueue).toHaveLength(0);
+  });
+
+  test('/takeover <sessionName> 将 attached session 置为 takeover_pending', async () => {
+    const mockIM = new MockIMPlugin();
+    (daemon as any)._imPlugin = mockIM;
+    (daemon as any)._imPluginName = 'mattermost';
+
+    daemon.registry.create('demo-takeover', { workdir: '/tmp', cliPlugin: 'claude-code' });
+    daemon.registry.markAttached('demo-takeover', 5678);
+
+    const msg = makeMsg({ text: '/takeover demo-takeover', isTopLevel: true, userId: 'user-im' });
+    await (daemon as any)._handleIncomingIMMessage(msg, 'ch1');
+
+    expect(daemon.registry.get('demo-takeover')?.status).toBe('takeover_pending');
+    expect((mockIM.sent[0].content as any).text).toContain('已请求接管会话 demo-takeover');
+  });
+
+  test('/takeover-force <sessionName> 强制释放 attached session', async () => {
+    const mockIM = new MockIMPlugin();
+    (daemon as any)._imPlugin = mockIM;
+    (daemon as any)._imPluginName = 'mattermost';
+
+    daemon.registry.create('demo-force', { workdir: '/tmp', cliPlugin: 'claude-code' });
+    daemon.registry.markAttached('demo-force', 999999999);
+
+    const msg = makeMsg({ text: '/takeover-force demo-force', isTopLevel: true, userId: 'user-im' });
+    await (daemon as any)._handleIncomingIMMessage(msg, 'ch1');
+
+    expect(daemon.registry.get('demo-force')?.status).toBe('idle');
+    expect((mockIM.sent[0].content as any).text).toContain('已强制接管会话 demo-force');
   });
 
   test('普通消息入队到对应 session', async () => {
@@ -334,6 +415,37 @@ describe('IMMessageDispatcher 动态 thread 路由', () => {
     const threads = new Set([...mockIM.liveMessageTargets.values()].map(t => t.threadId));
     expect(threads.has('thread-AAA')).toBe(true);
     expect(threads.has('thread-BBB')).toBe(true);
+  }, 10000);
+
+  test('dispatcher attached 状态下不消费 pending 消息', async () => {
+    const mockCli = path.join(tmpDir, 'should-not-run.sh');
+    fs.writeFileSync(mockCli, '#!/bin/sh\necho should-not-run\nexit 0\n', { mode: 0o755 });
+
+    const session = registry.create('sess-attached', { workdir: tmpDir, cliPlugin: 'mock' });
+    session.status = 'attached';
+
+    dispatcher = new IMMessageDispatcher({
+      registry,
+      imPlugin: mockIM,
+      imTarget: { plugin: 'mattermost', channelId: 'ch1', threadId: '' },
+      cliPlugin: new MockCLIPlugin(mockCli),
+      pollIntervalMs: 50,
+    });
+    dispatcher.start();
+
+    registry.enqueueIMMessage('sess-attached', {
+      text: 'hello while attached',
+      dedupeKey: 'dk-attached',
+      plugin: 'mattermost',
+      threadId: 'thread-attached',
+      messageId: 'mid-attached',
+      userId: 'u-attached',
+    });
+
+    await new Promise(resolve => setTimeout(resolve, 300));
+
+    expect(mockIM.liveMessages.size).toBe(0);
+    expect(registry.get('sess-attached')?.messageQueue[0].status).toBe('pending');
   }, 10000);
 
   test('Claude 非 0 退出时消息状态为 failed', async () => {

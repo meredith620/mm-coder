@@ -3,6 +3,14 @@ import type { Session, QueuedMessage, IMBinding } from './types.js';
 import { SessionStateMachine, INVALID_STATE_TRANSITION } from './session-state-machine.js';
 import type { PersistenceStore } from './persistence.js';
 
+function debugLog(payload: Record<string, unknown>): void {
+  try {
+    console.log(JSON.stringify({ at: new Date().toISOString(), component: 'session-registry', ...payload }));
+  } catch {
+    // ignore logging failure
+  }
+}
+
 class Mutex {
   private _queue: Array<() => void> = [];
   private _locked = false;
@@ -79,14 +87,33 @@ export class SessionRegistry {
 
   private _applyTransition(s: Session, event: Parameters<SessionStateMachine['transition']>[0]): void {
     const sm = new SessionStateMachine(s.status);
+    const from = s.status;
     try {
       sm.transition(event);
     } catch {
+      debugLog({ event: 'transition_failed', sessionName: s.name, from, trigger: event });
       throw new Error(INVALID_STATE_TRANSITION);
     }
     s.status = sm.current;
+    s.runtimeState = this._runtimeStateForStatus(s.status);
     s.revision += 1;
     s.lastActivityAt = new Date();
+    debugLog({ event: 'transition', sessionName: s.name, from, to: s.status, trigger: event, revision: s.revision });
+  }
+
+  private _runtimeStateForStatus(status: Session['status']): Session['runtimeState'] {
+    switch (status) {
+      case 'im_processing':
+        return 'running';
+      case 'approval_pending':
+        return 'waiting_approval';
+      case 'attached':
+        return 'attached_terminal';
+      case 'takeover_pending':
+        return 'takeover_pending';
+      default:
+        return 'idle';
+    }
   }
 
   create(name: string, opts: CreateOptions): Session {
@@ -100,6 +127,7 @@ export class SessionRegistry {
       status: 'idle',
       lifecycleStatus: 'active',
       initState: 'uninitialized',
+      runtimeState: 'idle',
       revision: 0,
       spawnGeneration: 0,
       attachedPid: null,
@@ -129,6 +157,7 @@ export class SessionRegistry {
       status: 'idle',
       lifecycleStatus: 'active',
       initState: 'initialized', // external session already initialized
+      runtimeState: 'idle',
       revision: 0,
       spawnGeneration: 0,
       attachedPid: null,
@@ -157,6 +186,17 @@ export class SessionRegistry {
   }
 
   // Synchronous mark — no CAS check, acquires lock internally (blocking callers must hold lock)
+  /** Update sessionId (e.g. after first CLI run returns real conversation ID) */
+  updateSessionId(name: string, newSessionId: string): void {
+    const s = this._getOrThrow(name);
+    s.sessionId = newSessionId;
+    if (s.initState === 'uninitialized') {
+      s.initState = 'initialized';
+    }
+    s.revision += 1;
+    s.lastActivityAt = new Date();
+  }
+
   markAttached(name: string, pid: number): void {
     const s = this._getOrThrow(name);
     this._guardLifecycle(s);
@@ -206,6 +246,7 @@ export class SessionRegistry {
     const s = this._getOrThrow(name);
     // Force to error state regardless of current state
     s.status = 'error';
+    s.runtimeState = 'idle';
     s.revision += 1;
     s.lastActivityAt = new Date();
   }
@@ -257,8 +298,8 @@ export class SessionRegistry {
 
     const msg: QueuedMessage = {
       messageId: opts.messageId ?? uuidv4(),
-      plugin: opts.plugin,
-      channelId: opts.channelId,
+      ...(opts.plugin !== undefined ? { plugin: opts.plugin } : {}),
+      ...(opts.channelId !== undefined ? { channelId: opts.channelId } : {}),
       threadId: opts.threadId ?? '',
       userId: opts.userId ?? '',
       content: opts.text,
@@ -268,6 +309,7 @@ export class SessionRegistry {
       enqueuePolicy: 'auto_after_detach',
     };
     s.messageQueue.push(msg);
+    debugLog({ event: 'enqueue_message', sessionName: name, messageId: msg.messageId, threadId: msg.threadId, channelId: msg.channelId, dedupeKey });
     return { alreadyExists: false };
   }
 
@@ -311,6 +353,39 @@ export class SessionRegistry {
     }
   }
 
+  requestTakeover(name: string, requestedBy?: string): void {
+    const s = this._getOrThrow(name);
+    this._guardLifecycle(s);
+    this._applyTransition(s, 'takeover_requested');
+    if (requestedBy !== undefined) {
+      s.takeoverRequestedBy = requestedBy;
+    } else {
+      delete s.takeoverRequestedBy;
+    }
+    s.takeoverRequestedAt = new Date().toISOString();
+  }
+
+  cancelTakeover(name: string): void {
+    const s = this._getOrThrow(name);
+    this._guardLifecycle(s);
+    if (s.status === 'takeover_pending') {
+      this._applyTransition(s, 'takeover_cancelled');
+    }
+    delete s.takeoverRequestedBy;
+    delete s.takeoverRequestedAt;
+  }
+
+  completeTakeover(name: string): void {
+    const s = this._getOrThrow(name);
+    this._guardLifecycle(s);
+    if (s.status === 'takeover_pending') {
+      this._applyTransition(s, 'terminal_sigterm_exited');
+    }
+    s.attachedPid = null;
+    delete s.takeoverRequestedBy;
+    delete s.takeoverRequestedAt;
+  }
+
   replayMessage(name: string, originalDedupeKey: string): QueuedMessage {
     const s = this._getOrThrow(name);
     const original = s.messageQueue.find(m => m.dedupeKey === originalDedupeKey);
@@ -318,8 +393,8 @@ export class SessionRegistry {
 
     const newMsg: QueuedMessage = {
       messageId: uuidv4(),
-      plugin: original.plugin,
-      channelId: original.channelId,
+      ...(original.plugin !== undefined ? { plugin: original.plugin } : {}),
+      ...(original.channelId !== undefined ? { channelId: original.channelId } : {}),
       threadId: original.threadId,
       userId: original.userId,
       content: original.content,

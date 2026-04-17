@@ -59,6 +59,13 @@ describe('StreamToIM — 流式输出防抖', () => {
     expect(mockIM.liveMessageTargets.get(msgId)?.threadId).toBe('t1');
   });
 
+  test('兼容 Claude 实际 assistant.message.content 结构', async () => {
+    await handler.onEvent({ type: 'assistant', message: { content: [{ type: 'text', text: 'Hi from real shape' }] } } as any);
+    expect(mockIM.liveMessages.size).toBe(1);
+    const msgId = [...mockIM.liveMessages.keys()][0];
+    expect(mockIM.liveMessages.get(msgId)).toBe('Hi from real shape');
+  });
+
   test('error 事件立即 flush', async () => {
     await handler.onEvent({ type: 'assistant', payload: { message: { content: [{ type: 'text', text: 'partial' }] } } });
     const msgId = [...mockIM.liveMessages.keys()][0];

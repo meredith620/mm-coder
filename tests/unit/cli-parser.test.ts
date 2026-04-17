@@ -15,6 +15,18 @@ describe('CLI 命令解析', () => {
     expect(parsed.args.name).toBe('test');
   });
 
+  test('parse "takeover-status demo"', () => {
+    const parsed = parseCLIArgs(['takeover-status', 'demo']);
+    expect(parsed.command).toBe('takeover-status');
+    expect(parsed.args.name).toBe('demo');
+  });
+
+  test('parse "takeover-cancel demo"', () => {
+    const parsed = parseCLIArgs(['takeover-cancel', 'demo']);
+    expect(parsed.command).toBe('takeover-cancel');
+    expect(parsed.args.name).toBe('demo');
+  });
+
   test('parse "import uuid-123 --name imported --workdir /tmp"', () => {
     const parsed = parseCLIArgs(['import', 'uuid-123', '--name', 'imported', '--workdir', '/tmp']);
     expect(parsed.command).toBe('import');

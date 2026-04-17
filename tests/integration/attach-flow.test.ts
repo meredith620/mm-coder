@@ -45,6 +45,23 @@ describe('attach 流程', () => {
     fs.rmSync(tmpDir, { recursive: true, force: true });
   });
 
+  test('attach spawn 时使用 session.workdir 作为 cwd', async () => {
+    const markerDir = fs.mkdtempSync(path.join(tmpDir, 'cwd-marker-'));
+    const markerFile = path.join(markerDir, 'pwd.txt');
+    const mockCli = path.join(tmpDir, 'mock-cwd.sh');
+    fs.writeFileSync(mockCli, `#!/bin/sh\npwd > "${markerFile}"\nexit 0\n`, { mode: 0o755 });
+
+    await attachSession({
+      socketPath,
+      sessionName: 'test-session',
+      cliCommand: mockCli,
+      cliArgs: [],
+      workdir: markerDir,
+    });
+
+    expect(fs.readFileSync(markerFile, 'utf-8').trim()).toBe(markerDir);
+  }, 10000);
+
   test('attach 完整流程：通知 daemon → spawn → 退出 → 通知 detach', async () => {
     // Create a mock CLI script that exits immediately
     const mockCli = path.join(tmpDir, 'mock-cli.sh');

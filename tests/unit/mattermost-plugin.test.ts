@@ -47,6 +47,8 @@ describe('Mattermost config loader', () => {
     expect(text).toContain('/list');
     expect(text).toContain('/status');
     expect(text).toContain('/open <sessionName>');
+    expect(text).toContain('/takeover <sessionName>');
+    expect(text).toContain('/takeover-force <sessionName>');
     expect(text).toContain('普通文本消息');
     expect(text).toContain('请在 CLI 中使用');
   });
@@ -247,6 +249,19 @@ describe('MattermostPlugin', () => {
     expect(received).toEqual(['hello from ws']);
   });
 
+  test('sendMessage 使用 target.channelId，且空 threadId 不发送 root_id', async () => {
+    const plugin = new MattermostPlugin({ url: BASE_URL, token: TOKEN, channelId: CHANNEL_ID });
+    await plugin.sendMessage({ plugin: 'mattermost', channelId: 'ch-other', threadId: '' }, { kind: 'text', text: 'hello' });
+
+    expect(fetchSpy).toHaveBeenCalledOnce();
+    const [url, opts] = fetchSpy.mock.calls[0];
+    expect(url).toBe(`${BASE_URL}/api/v4/posts`);
+    const body = JSON.parse(opts.body);
+    expect(body.channel_id).toBe('ch-other');
+    expect(body.message).toBe('hello');
+    expect(body.root_id).toBeUndefined();
+  });
+
   test('sendMessage 调用正确 API endpoint', async () => {
     const plugin = new MattermostPlugin({ url: BASE_URL, token: TOKEN, channelId: CHANNEL_ID });
     await plugin.sendMessage({ plugin: 'mattermost', threadId: 'root-post-id' }, { kind: 'text', text: 'hello' });
@@ -270,6 +285,18 @@ describe('MattermostPlugin', () => {
     expect(opts.method).toBe('PUT');
     const body = JSON.parse(opts.body);
     expect(body.message).toBe('updated');
+  });
+
+  test('createLiveMessage 创建顶层 post 时不发送 root_id 并返回 id', async () => {
+    const plugin = new MattermostPlugin({ url: BASE_URL, token: TOKEN, channelId: CHANNEL_ID });
+    const msgId = await plugin.createLiveMessage({ plugin: 'mattermost', channelId: 'ch-top', threadId: '' }, { kind: 'text', text: 'live top' });
+
+    expect(msgId).toBe('post1');
+    expect(fetchSpy).toHaveBeenCalledOnce();
+    const [, opts] = fetchSpy.mock.calls[0];
+    const body = JSON.parse(opts.body);
+    expect(body.channel_id).toBe('ch-top');
+    expect(body.root_id).toBeUndefined();
   });
 
   test('createLiveMessage 创建 post 并返回 id', async () => {

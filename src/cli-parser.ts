@@ -1,7 +1,7 @@
-type CLICommand = 'create' | 'attach' | 'import' | 'list' | 'status' | 'remove' | 'start' | 'stop' | 'restart' | 'im' | 'im-init' | 'im-verify' | 'im-run' | 'tui';
+type CLICommand = 'create' | 'attach' | 'diagnose' | 'takeover-status' | 'takeover-cancel' | 'import' | 'list' | 'status' | 'remove' | 'start' | 'stop' | 'restart' | 'im' | 'im-init' | 'im-verify' | 'im-run' | 'tui';
 type IMSubcommand = 'init' | 'verify' | 'run';
 
-const KNOWN_COMMANDS = new Set<CLICommand>(['create', 'attach', 'import', 'list', 'status', 'remove', 'start', 'stop', 'restart', 'im', 'im-init', 'im-verify', 'im-run', 'tui']);
+const KNOWN_COMMANDS = new Set<CLICommand>(['create', 'attach', 'diagnose', 'takeover-status', 'takeover-cancel', 'import', 'list', 'status', 'remove', 'start', 'stop', 'restart', 'im', 'im-init', 'im-verify', 'im-run', 'tui']);
 const IM_SUBCOMMANDS = new Set<IMSubcommand>(['init', 'verify', 'run']);
 
 export interface ParsedCLI {
@@ -86,6 +86,15 @@ export function parseCLIArgs(argv: string[]): ParsedCLI {
       if (positionals[0] && !args['name']) args['name'] = positionals[0];
       break;
     case 'attach':
+      if (positionals[0] && !args['name']) args['name'] = positionals[0];
+      break;
+    case 'diagnose':
+      if (positionals[0] && !args['name']) args['name'] = positionals[0];
+      break;
+    case 'takeover-status':
+      if (positionals[0] && !args['name']) args['name'] = positionals[0];
+      break;
+    case 'takeover-cancel':
       if (positionals[0] && !args['name']) args['name'] = positionals[0];
       break;
     case 'import':

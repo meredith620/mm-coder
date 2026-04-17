@@ -5,6 +5,14 @@ import type { IMPlugin, CLIPlugin } from './plugins/types.js';
 import type { MessageTarget, QueuedMessage, Session } from './types.js';
 import { StreamToIM } from './stream-to-im.js';
 
+function debugLog(payload: Record<string, unknown>): void {
+  try {
+    console.log(JSON.stringify({ at: new Date().toISOString(), component: 'im-dispatcher', ...payload }));
+  } catch {
+    // ignore logging failure
+  }
+}
+
 export interface IMMessageDispatcherOptions {
   registry: SessionRegistry;
   imPlugin: IMPlugin;
@@ -56,6 +64,9 @@ export class IMMessageDispatcher {
   private async _tick(): Promise<void> {
     const sessions = this._opts.registry.list();
     for (const session of sessions) {
+      if (session.status !== 'idle' && session.status !== 'im_processing') {
+        continue;
+      }
       const pending = session.messageQueue.filter(m => m.status === 'pending');
       for (const msg of pending) {
         const key = `${session.name}:${msg.messageId}`;
@@ -79,9 +90,13 @@ export class IMMessageDispatcher {
   private _buildTarget(message: QueuedMessage): MessageTarget {
     return {
       plugin: message.plugin ?? this._opts.imTarget.plugin,
-      channelId: message.channelId ?? this._opts.imTarget.channelId,
+      ...(message.channelId !== undefined || this._opts.imTarget.channelId !== undefined
+        ? { channelId: message.channelId ?? this._opts.imTarget.channelId }
+        : {}),
       threadId: message.threadId || this._opts.imTarget.threadId,
-      userId: message.userId || this._opts.imTarget.userId,
+      ...(message.userId || this._opts.imTarget.userId
+        ? { userId: message.userId || this._opts.imTarget.userId }
+        : {}),
     };
   }
 
@@ -111,9 +126,20 @@ export class IMMessageDispatcher {
     const registry = this._opts.registry;
     const { session, message } = this._getSessionAndMessage(sessionName, messageId);
     const streamToIM = new StreamToIM(this._resolveIMPlugin(message, session), this._buildTarget(message));
+    const wasUninitialized = session.initState === 'uninitialized';
 
     let finalStatus: QueuedMessage['status'] = 'failed';
     let currentAttempt = attempt;
+
+    debugLog({
+      event: 'process_start',
+      sessionName,
+      messageId,
+      threadId: message.threadId,
+      channelId: message.channelId,
+      attempt: currentAttempt,
+      content: message.content,
+    });
 
     // Update session status to im_processing
     try {
@@ -125,6 +151,7 @@ export class IMMessageDispatcher {
         try {
           const exitCode = await new Promise<number>((resolve) => {
             const cmdSpec = this._buildCLICommand(session, message);
+            debugLog({ event: 'spawn_cli', sessionName, messageId, command: cmdSpec.command, args: cmdSpec.args, workdir: session.workdir });
             const proc = spawn(cmdSpec.command, cmdSpec.args, {
               stdio: ['pipe', 'pipe', 'pipe'],
               cwd: session.workdir,
@@ -133,18 +160,36 @@ export class IMMessageDispatcher {
             const rl = readline.createInterface({ input: proc.stdout!, crlfDelay: Infinity });
             rl.on('line', (line) => {
               if (!line.trim()) return;
+              debugLog({ event: 'stdout_line', sessionName, messageId, line });
               try {
                 const event = JSON.parse(line) as { type: string; payload: unknown };
                 void streamToIM.onEvent(event as Parameters<typeof streamToIM.onEvent>[0]);
-              } catch { /* ignore non-JSON */ }
+              } catch {
+                debugLog({ event: 'stdout_non_json', sessionName, messageId, line });
+              }
+            });
+
+            const stderrRl = readline.createInterface({ input: proc.stderr!, crlfDelay: Infinity });
+            stderrRl.on('line', (line) => {
+              if (!line.trim()) return;
+              debugLog({ event: 'stderr_line', sessionName, messageId, line });
             });
 
             proc.on('close', (code) => resolve(code ?? 0));
-            proc.on('error', () => resolve(1));
+            proc.on('error', (err) => {
+              debugLog({ event: 'spawn_error', sessionName, messageId, error: err.message });
+              resolve(1);
+            });
           });
+
+          debugLog({ event: 'process_exit', sessionName, messageId, exitCode });
 
           if (exitCode === 0) {
             finalStatus = 'completed';
+            // 首次运行成功后标记为 initialized，后续使用 --resume
+            if (wasUninitialized) {
+              try { registry.updateSessionId(sessionName, session.sessionId); } catch { /* best-effort */ }
+            }
             break;
           }
         } catch {
@@ -168,8 +213,11 @@ export class IMMessageDispatcher {
       }
       try {
         registry.markImDone(sessionName);
+        debugLog({ event: 'mark_im_done', sessionName, messageId, finalStatus, sessionStatus: registry.get(sessionName)?.status });
         this._opts.onSessionImDone?.(sessionName);
-      } catch { /* ignore invalid transitions */ }
+      } catch (err) {
+        debugLog({ event: 'mark_im_done_failed', sessionName, messageId, error: (err as Error).message });
+      }
     }
   }
 }

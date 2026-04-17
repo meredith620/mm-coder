@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import { spawn, execSync } from 'child_process';
+import { spawn } from 'child_process';
 import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
@@ -7,15 +7,18 @@ import { fileURLToPath } from 'url';
 import { IPCClient } from './ipc/client.js';
 import { attachSession } from './attach.js';
 import { parseCLIArgs } from './cli-parser.js';
+import { BUILD_GIT_HASH, BUILD_VERSION } from './generated/build-info.js';
 import { getCLIPlugin, getDefaultCLIPluginName } from './plugins/cli/registry.js';
+import { getClaudeSessionPath, hasClaudeSession } from './plugins/cli/claude-code.js';
 import { getIMPluginFactory, getDefaultIMPluginName } from './plugins/im/registry.js';
 import type { Session } from './types.js';
 
 const SOCKET_PATH = process.env.MM_CODER_SOCKET ?? path.join(os.tmpdir(), 'mm-coder-daemon.sock');
 const PID_FILE = process.env.MM_CODER_PID_FILE ?? path.join(os.tmpdir(), 'mm-coder-daemon.pid');
 const PERSISTENCE_PATH = process.env.MM_CODER_SESSIONS ?? path.join(os.homedir(), '.mm-coder', 'sessions.json');
-const VERSION = '0.1.0';
-const GIT_HASH = execSync('git rev-parse --short HEAD', { encoding: 'utf-8' }).trim();
+const LOG_PATH = process.env.MM_CODER_LOG ?? path.join(os.homedir(), '.mm-coder', 'daemon.log');
+const VERSION = BUILD_VERSION;
+const GIT_HASH = BUILD_GIT_HASH;
 
 function printVersion() {
   console.log(`mm-coder ${VERSION} (${GIT_HASH})`);
@@ -35,6 +38,11 @@ async function main() {
   }
 
   try {
+    if (argv[0] === 'start-fg') {
+      await handleStartForeground(argv.slice(1));
+      return;
+    }
+
     const parsed = parseCLIArgs(argv);
 
     switch (parsed.command) {
@@ -56,15 +64,22 @@ async function main() {
       case 'list':
         await handleList();
         break;
+      case 'takeover-status':
+        await handleTakeoverStatus(parsed.args);
+        break;
+      case 'takeover-cancel':
+        await handleTakeoverCancel(parsed.args);
+        break;
       case 'status':
         await handleStatus(parsed.args);
         break;
       case 'remove':
         await handleRemove(parsed.args);
         break;
-      case 'import':
-        await handleImport(parsed.args);
+      case 'diagnose':
+        await handleDiagnose(parsed.args);
         break;
+      case 'import':
       case 'im':
         await handleIm(parsed.subcommand!, parsed.args);
         break;
@@ -91,11 +106,15 @@ USAGE:
 
 COMMANDS:
   start                           Start daemon in background
+  start-fg                        Start daemon in foreground and print logs
   stop                            Stop the running daemon
   restart                         Restart the daemon
   create <name> [-n|--name <name>] [-w|--workdir <path>] [-C|--cli <name>]
                                   Create a new session
   attach <name> [-n|--name <name>]  Attach to a session
+  diagnose <name>                   Print local diagnostic info for a session
+  takeover-status <name>            Show takeover request state
+  takeover-cancel <name>            Cancel a pending takeover request
   list                            List all sessions
   status [name] [-n|--name <name>]  Show daemon/session status
   remove <name> [-n|--name <name>]  Remove a session
@@ -111,8 +130,12 @@ COMMANDS:
 
 EXAMPLES:
   mm-coder start
+  mm-coder start-fg
   mm-coder create bug-fix -w ~/myapp
   mm-coder attach bug-fix -n my-session
+  mm-coder diagnose bug-fix
+  mm-coder takeover-status bug-fix
+  mm-coder takeover-cancel bug-fix
   mm-coder list
   mm-coder status bug-fix -n my-session
   mm-coder remove bug-fix -n my-session
@@ -145,6 +168,7 @@ async function handleStart(args: Record<string, string | undefined>) {
     PERSISTENCE_PATH,
     imConfigPath ?? '',
     imPluginName,
+    LOG_PATH,
   ];
 
   const child = spawn(process.execPath, childArgs, {
@@ -154,6 +178,33 @@ async function handleStart(args: Record<string, string | undefined>) {
 
   child.unref();
   console.log(`Daemon started (PID ${child.pid})`);
+  console.log(`Log file: ${LOG_PATH}`);
+}
+
+async function handleStartForeground(argv: string[]) {
+  const parsed = argv.length > 0 ? parseCLIArgs(['start', ...argv]) : { command: 'start', args: {} as Record<string, string | undefined> };
+  const args = parsed.args;
+  const imPluginName = args.plugin ?? getDefaultIMPluginName();
+  const imConfigPath = args.config;
+  const childArgs = [
+    path.join(path.dirname(fileURLToPath(import.meta.url)), 'daemon-main.js'),
+    SOCKET_PATH,
+    '',
+    PERSISTENCE_PATH,
+    imConfigPath ?? '',
+    imPluginName,
+    LOG_PATH,
+  ];
+
+  console.log(`Starting daemon in foreground. Log file: ${LOG_PATH}`);
+  const child = spawn(process.execPath, childArgs, {
+    stdio: 'inherit',
+  });
+
+  await new Promise<number>((resolve, reject) => {
+    child.on('close', code => resolve(code ?? 0));
+    child.on('error', reject);
+  });
 }
 
 async function handleStop() {
@@ -223,6 +274,7 @@ async function handleAttach(args: Record<string, string | undefined>) {
   }
 
   const cliPluginName = typeof sessionSummary.cliPlugin === 'string' ? sessionSummary.cliPlugin : getDefaultCLIPluginName();
+  const initState = typeof sessionSummary.initState === 'string' ? sessionSummary.initState as Session['initState'] : 'uninitialized';
   const session: Session = {
     name,
     sessionId: typeof sessionSummary.sessionId === 'string' ? sessionSummary.sessionId : '',
@@ -230,7 +282,8 @@ async function handleAttach(args: Record<string, string | undefined>) {
     workdir: typeof sessionSummary.workdir === 'string' ? sessionSummary.workdir : process.cwd(),
     status: (sessionSummary.status as Session['status']) ?? 'idle',
     lifecycleStatus: (sessionSummary.lifecycleStatus as Session['lifecycleStatus']) ?? 'active',
-    initState: 'initialized',
+    initState,
+    runtimeState: (sessionSummary.runtimeState as Session['runtimeState']) ?? (typeof sessionSummary.status === 'string' && sessionSummary.status === 'attached' ? 'attached_terminal' : 'idle'),
     revision: 0,
     spawnGeneration: 0,
     attachedPid: null,
@@ -242,7 +295,7 @@ async function handleAttach(args: Record<string, string | undefined>) {
     lastActivityAt: new Date(),
   };
 
-  if (!session.sessionId) {
+  if (initState !== 'uninitialized' && !session.sessionId) {
     throw new Error(`Session ${name} is missing sessionId`);
   }
 
@@ -254,7 +307,52 @@ async function handleAttach(args: Record<string, string | undefined>) {
     sessionName: name,
     cliCommand: cmdSpec.command,
     cliArgs: cmdSpec.args,
+    workdir: session.workdir,
   });
+}
+
+async function handleDiagnose(args: Record<string, string | undefined>) {
+  const name = args.name;
+  if (!name) {
+    throw new Error('Missing required argument: name');
+  }
+
+  const client = new IPCClient(SOCKET_PATH);
+  await client.connect();
+  const res = await client.send('status', {});
+  await client.close();
+
+  if (!res.ok) {
+    throw new Error(`Failed to get status: ${res.error!.message}`);
+  }
+
+  const sessions = res.data!.sessions as Array<Record<string, unknown>>;
+  const session = sessions.find(s => s.name === name);
+  if (!session) {
+    throw new Error(`Session not found: ${name}`);
+  }
+
+  const workdir = typeof session.workdir === 'string' ? session.workdir : process.cwd();
+  const sessionId = typeof session.sessionId === 'string' ? session.sessionId : '';
+  const sessionFile = getClaudeSessionPath(workdir, sessionId);
+  const hasLocalSession = hasClaudeSession(workdir, sessionId);
+  const commandMode = hasLocalSession ? '--resume' : '--session-id';
+
+  console.log(JSON.stringify({
+    name,
+    sessionId,
+    status: session.status,
+    lifecycleStatus: session.lifecycleStatus,
+    initState: session.initState,
+    workdir,
+    cwd: process.cwd(),
+    localClaudeSessionPath: sessionFile,
+    localClaudeSessionExists: hasLocalSession,
+    nextAttachMode: commandMode,
+    logPath: LOG_PATH,
+    socketPath: SOCKET_PATH,
+    persistencePath: PERSISTENCE_PATH,
+  }, null, 2));
 }
 
 async function handleList() {
@@ -278,6 +376,38 @@ async function handleList() {
   for (const s of sessions) {
     console.log(`  ${s.name} (${s.status}) - ${s.workdir}`);
   }
+}
+
+async function handleTakeoverStatus(args: Record<string, string | undefined>) {
+  const name = args.name;
+  if (!name) throw new Error('Missing required argument: name');
+
+  const client = new IPCClient(SOCKET_PATH);
+  await client.connect();
+  const res = await client.send('takeoverStatus', { name });
+  await client.close();
+
+  if (!res.ok) {
+    throw new Error(`Failed to get takeover status: ${res.error!.message}`);
+  }
+
+  console.log(JSON.stringify(res.data, null, 2));
+}
+
+async function handleTakeoverCancel(args: Record<string, string | undefined>) {
+  const name = args.name;
+  if (!name) throw new Error('Missing required argument: name');
+
+  const client = new IPCClient(SOCKET_PATH);
+  await client.connect();
+  const res = await client.send('takeoverCancel', { name });
+  await client.close();
+
+  if (!res.ok) {
+    throw new Error(`Failed to cancel takeover: ${res.error!.message}`);
+  }
+
+  console.log(`Takeover for '${name}' cancelled`);
 }
 
 async function handleStatus(args: Record<string, string | undefined>) {

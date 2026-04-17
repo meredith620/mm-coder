@@ -1,14 +1,42 @@
 import { randomUUID } from 'crypto';
+import * as fs from 'fs';
+import * as os from 'os';
+import * as path from 'path';
 import { createInterface } from 'readline';
 import type { Readable } from 'stream';
 import type { Session, CLIEvent, StreamCursor } from '../../types.js';
 import type { CLIPlugin, CommandSpec } from '../types.js';
 
+export function getClaudeProjectPath(workdir: string): string {
+  const normalizedWorkdir = path.resolve(workdir).replace(/[\\/]/g, '-');
+  return path.join(os.homedir(), '.claude', 'projects', normalizedWorkdir);
+}
+
+export function getClaudeSessionPath(workdir: string, sessionId: string): string {
+  return path.join(getClaudeProjectPath(workdir), `${sessionId}.jsonl`);
+}
+
+export function hasClaudeSession(workdir: string, sessionId: string): boolean {
+  if (!sessionId) return false;
+  return fs.existsSync(getClaudeSessionPath(workdir, sessionId));
+}
+
 export class ClaudeCodePlugin implements CLIPlugin {
+  /**
+   * 真实恢复依据不是 initState，而是 Claude 本地 session 文件是否存在。
+   * 这样可覆盖“打开 TUI 但未产生任何可恢复对话”这类场景。
+   */
+  private _resumeArgs(session: Session): string[] {
+    if (hasClaudeSession(session.workdir, session.sessionId)) {
+      return ['--resume', session.sessionId];
+    }
+    return ['--session-id', session.sessionId];
+  }
+
   buildAttachCommand(session: Session): CommandSpec {
     return {
       command: 'claude',
-      args: ['--resume', session.sessionId],
+      args: this._resumeArgs(session),
     };
   }
 
@@ -17,7 +45,7 @@ export class ClaudeCodePlugin implements CLIPlugin {
       command: 'claude',
       args: [
         '-p',
-        '--resume', session.sessionId,
+        ...this._resumeArgs(session),
         '--input-format', 'stream-json',
         '--output-format', 'stream-json',
         '--verbose',
@@ -31,8 +59,9 @@ export class ClaudeCodePlugin implements CLIPlugin {
       command: 'claude',
       args: [
         '-p', prompt,
-        '--resume', session.sessionId,
+        ...this._resumeArgs(session),
         '--output-format', 'stream-json',
+        '--verbose',
       ],
     };
   }

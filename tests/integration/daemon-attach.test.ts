@@ -1,4 +1,5 @@
 import { describe, test, expect, beforeEach, afterEach } from 'vitest';
+import * as net from 'net';
 import { Daemon } from '../../src/daemon.js';
 import { IPCClient } from '../../src/ipc/client.js';
 import * as path from 'path';
@@ -119,5 +120,43 @@ describe('attach command', () => {
     const res = await client.send('attach', { name: 'a7', pid: 10000 });
     expect(res.ok).toBe(true);
     expect(res.data!.session.status).toBe('attached');
+  });
+
+  test('IM 完成后向 attach waiter 推送 session_resume', async () => {
+    await client.send('create', { name: 'a8', workdir: '/tmp', cli: 'claude-code' });
+    daemon.registry.markImProcessing('a8');
+
+    const waiter = await new Promise<net.Socket>((resolve, reject) => {
+      const socket = net.createConnection(socketPath);
+      socket.once('connect', () => resolve(socket));
+      socket.once('error', reject);
+    });
+
+    const chunks: string[] = [];
+    waiter.on('data', chunk => chunks.push(chunk.toString()));
+
+    waiter.write(`${JSON.stringify({
+      type: 'request',
+      requestId: 'req-a8',
+      command: 'attach',
+      args: { name: 'a8', pid: 9999 },
+    })}\n`);
+
+    await new Promise(resolve => setTimeout(resolve, 50));
+    daemon.registry.markImDone('a8');
+    await new Promise(resolve => setTimeout(resolve, 50));
+
+    expect(chunks.join('')).toContain('session_resume');
+    waiter.destroy();
+  });
+
+  test('takeover_pending 状态下 markDetached 释放为 idle', async () => {
+    await client.send('create', { name: 'a9', workdir: '/tmp', cli: 'claude-code' });
+    await client.send('attach', { name: 'a9', pid: 9999 });
+    daemon.registry.requestTakeover('a9', 'user-im');
+
+    const res = await client.send('markDetached', { name: 'a9', exitReason: 'normal' });
+    expect(res.ok).toBe(true);
+    expect(daemon.registry.get('a9')?.status).toBe('idle');
   });
 });

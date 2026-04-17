@@ -47,6 +47,7 @@ describe('SessionStateMachine', () => {
     ['idle',            'im_message_received',                 'im_processing'],
     ['attached',        'attach_exit_normal',                  'idle'],
     ['attached',        'takeover_requested',                  'takeover_pending'],
+    ['takeover_pending','takeover_cancelled',                 'attached'],
     ['takeover_pending','terminal_sigterm_exited',             'idle'],
     ['im_processing',   'tool_permission_required',            'approval_pending'],
     ['approval_pending','approval_approved',                   'im_processing'],

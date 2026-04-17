@@ -116,8 +116,10 @@ export function getMattermostCommandHelpText(): string {
     '`/list` — 列出所有 mm-coder session 及绑定 thread',
     '`/status` — 显示当前 session 状态（在 thread 中）或全局统计（在主频道）',
     '`/open <sessionName>` — 为未绑定 session 创建独立 thread；已有绑定则跳转到对应 thread',
+    '`/takeover <sessionName>` — 请求接管当前被终端占用的会话',
+    '`/takeover-force <sessionName>` — 立即强制接管当前被终端占用的会话',
     '',
-    '在 thread 中发送普通文本消息将交给 Claude 处理。',
+    '在 thread 中发送普通文本消息将交给 Claude 处理。若会话正被终端占用，消息会被拒绝并提示使用 takeover。',
     '`/remove`、`/attach`、`/create` 等 session 管理命令请在 CLI 中使用。',
   ].join('\n');
 }
@@ -224,6 +226,17 @@ export class MattermostPlugin implements IMPlugin {
 
   onMessage(handler: (msg: IncomingMessage) => void): void {
     this._handlers.push(handler);
+  }
+
+  private _debugLog(payload: Record<string, unknown>): void {
+    try {
+      const debugPath = process.env.MM_CODER_MM_DEBUG_LOG;
+      if (!debugPath) return;
+      fs.mkdirSync(path.dirname(debugPath), { recursive: true });
+      fs.appendFileSync(debugPath, `${JSON.stringify({ at: new Date().toISOString(), ...payload })}\n`, 'utf-8');
+    } catch {
+      // ignore debug logging failure
+    }
   }
 
   private _headers(): Record<string, string> {
@@ -338,30 +351,43 @@ export class MattermostPlugin implements IMPlugin {
       dedupeKey: post.id as string,
     };
 
+    this._debugLog({
+      event: 'ws_posted',
+      channelId,
+      rootId: post.root_id as string | undefined,
+      postId: post.id as string,
+      isTopLevel: incoming.isTopLevel,
+    });
+
     for (const h of this._handlers) h(incoming);
   }
 
   async sendMessage(target: MessageTarget, content: MessageContent): Promise<void> {
+    const body = {
+      channel_id: target.channelId ?? this._config.channelId,
+      ...(target.threadId ? { root_id: target.threadId } : {}),
+      message: this._toText(content),
+    };
+    this._debugLog({ event: 'sendMessage', body });
     await this._apiRequest('/api/v4/posts', {
       method: 'POST',
-      body: JSON.stringify({
-        channel_id: this._config.channelId,
-        root_id: target.threadId,
-        message: this._toText(content),
-      }),
+      body: JSON.stringify(body),
     });
   }
 
   async createLiveMessage(target: MessageTarget, content: MessageContent): Promise<string> {
+    const body = {
+      channel_id: target.channelId ?? this._config.channelId,
+      ...(target.threadId ? { root_id: target.threadId } : {}),
+      message: this._toText(content),
+    };
+    this._debugLog({ event: 'createLiveMessage_request', body });
     const res = await this._apiRequest('/api/v4/posts', {
       method: 'POST',
-      body: JSON.stringify({
-        channel_id: this._config.channelId,
-        root_id: target.threadId,
-        message: this._toText(content),
-      }),
+      body: JSON.stringify(body),
     });
     const data = await res.json() as { id: string };
+    this._debugLog({ event: 'createLiveMessage_response', response: data });
     return data.id;
   }
 

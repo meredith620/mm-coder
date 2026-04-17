@@ -2,11 +2,12 @@
 /**
  * Daemon entry point — invoked by `mm-coder start` as a detached child process.
  * argv[2] = socketPath, argv[3] = pidFile, argv[4] = persistencePath,
- * argv[5] = imConfigPath, argv[6] = imPluginName
+ * argv[5] = imConfigPath, argv[6] = imPluginName, argv[7] = logPath
  */
 import { Daemon } from './daemon.js';
 import * as path from 'path';
 import * as os from 'os';
+import * as fs from 'fs';
 import { getDefaultIMPluginName } from './plugins/im/registry.js';
 
 const socketPath = process.argv[2];
@@ -14,10 +15,36 @@ const pidFile = process.argv[3];
 const persistencePath = process.argv[4] ?? path.join(os.homedir(), '.mm-coder', 'sessions.json');
 const imConfigPath = process.argv[5];
 const imPluginName = process.argv[6] ?? getDefaultIMPluginName();
+const logPath = process.argv[7];
 
 if (!socketPath) {
-  process.stderr.write('Usage: daemon-main.js <socketPath> [pidFile] [persistencePath] [imConfigPath] [imPluginName]\n');
+  process.stderr.write('Usage: daemon-main.js <socketPath> [pidFile] [persistencePath] [imConfigPath] [imPluginName] [logPath]\n');
   process.exit(1);
+}
+
+if (logPath) {
+  fs.mkdirSync(path.dirname(logPath), { recursive: true });
+  const logStream = fs.createWriteStream(logPath, { flags: 'a' });
+  const origStdoutWrite = process.stdout.write.bind(process.stdout);
+  const origStderrWrite = process.stderr.write.bind(process.stderr);
+
+  const tee = (chunk: any, encoding?: any, cb?: any) => {
+    logStream.write(chunk, encoding);
+    if (typeof cb === 'function') cb();
+    return true;
+  };
+
+  process.stdout.write = ((chunk: any, encoding?: any, cb?: any) => {
+    tee(chunk, encoding, cb);
+    return origStdoutWrite(chunk, encoding, cb);
+  }) as typeof process.stdout.write;
+
+  process.stderr.write = ((chunk: any, encoding?: any, cb?: any) => {
+    tee(chunk, encoding, cb);
+    return origStderrWrite(chunk, encoding, cb);
+  }) as typeof process.stderr.write;
+
+  process.on('exit', () => logStream.end());
 }
 
 const daemon = new Daemon(socketPath, {

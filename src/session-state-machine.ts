@@ -7,6 +7,7 @@ export type StateEvent =
   | 'im_message_received'
   | 'attach_exit_normal'
   | 'takeover_requested'
+  | 'takeover_cancelled'
   | 'terminal_sigterm_exited'
   | 'tool_permission_required'
   | 'approval_approved'
@@ -47,6 +48,7 @@ export const TRANSITION_TABLE: Record<SessionStatus, Partial<Record<StateEvent, 
   },
   takeover_pending: {
     terminal_sigterm_exited: 'idle',
+    takeover_cancelled: 'attached',
   },
   recovering: {
     worker_restarted:     'idle',

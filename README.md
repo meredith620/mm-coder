@@ -10,6 +10,7 @@ AI CLI 会话桥接工具 — 管理多个 AI CLI 会话，支持终端直接交
 
 - **终端零中间层** — attach 时直接运行 AI CLI，体验与原生完全一致
 - **IM 远程续接** — 离开电脑后通过 Mattermost 继续推进任务
+- **终端优先 + 接管** — 终端 attach 时 IM 普通消息会被拒绝，可用 takeover 请求或强制接管
 - **多会话并行** — 同时管理多个独立会话，终端和 IM 各自操作
 - **权限审批转发** — 终端不在时，权限请求自动转发到 IM 审批
 - **插件化扩展** — IM 端（Mattermost / Slack / Discord）和 CLI 端（Claude Code / Codex / Gemini）均可通过插件扩展
@@ -26,8 +27,9 @@ mm-coder attach bug-fix                     # 直接进入 Claude Code
 # 退出 Claude Code = 释放会话
 
 # IM 远程交互
-# 在 Mattermost 上继续与 bug-fix 会话对话
-# 权限请求通过 emoji 审批
+# `/open <name>` 定位到对应 thread
+# attached 时 IM 普通消息会被拒绝，并提示使用 `/takeover <name>`
+# `/takeover <name>` 请求终端释放；`/takeover-force <name>` 立即接管
 
 # 回到终端
 mm-coder attach bug-fix                     # 再次进入，自动 resume
@@ -97,10 +99,10 @@ mm-coder attach bug-fix                     # 再次进入，自动 resume
 
 Session-based 混合方案：
 
-- **终端**：CLI 插件负责构造 attach 命令，默认实现为 `claude --resume <id>`
+- **终端**：CLI 插件负责构造 attach 命令，默认实现为 `claude --resume <id>` / `claude --session-id <id>`
 - **IM**：daemon 根据 session 的 `cliPlugin` 动态选择 CLI 插件，执行 `buildIMMessageCommand()`
-- **路由**：IM 回复目标优先使用消息自身的 `plugin/channelId/threadId`，不再依赖单一固定 thread
-- 两端通过 session ID 共享同一会话上下文，互斥使用
+- **路由**：IM 回复目标优先使用消息自身的 `plugin/channelId/threadId`
+- **互斥**：终端 attach 时 IM 普通消息会被拒绝；可通过 takeover 交接控制权
 
 详见 [docs/SPEC.md](docs/SPEC.md)。
 

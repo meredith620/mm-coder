@@ -1,5 +1,7 @@
 // Core domain types for mm-coder
 
+export type RuntimeState = 'idle' | 'running' | 'waiting_approval' | 'attached_terminal' | 'takeover_pending';
+
 export type SessionStatus =
   | 'idle'
   | 'attach_pending'
@@ -59,6 +61,9 @@ export interface Session {
   status: SessionStatus;
   lifecycleStatus: LifecycleStatus;
   initState: InitState;
+  runtimeState: RuntimeState;
+  takeoverRequestedBy?: string;
+  takeoverRequestedAt?: string;
 
   revision: number;
   spawnGeneration: number;

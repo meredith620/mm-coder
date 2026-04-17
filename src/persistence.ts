@@ -71,6 +71,7 @@ export class PersistenceStore {
         status,
         lifecycleStatus: (p.lifecycleStatus as Session['lifecycleStatus']) ?? 'active',
         initState: (p.initState as Session['initState']) ?? 'uninitialized',
+        runtimeState: status === 'attached' ? 'attached_terminal' : status === 'im_processing' ? 'running' : status === 'approval_pending' ? 'waiting_approval' : status === 'takeover_pending' ? 'takeover_pending' : 'idle',
         revision: p.revision ?? 0,
         spawnGeneration: p.spawnGeneration ?? 0,
         attachedPid: null,
