@@ -12,6 +12,8 @@ export interface MattermostConfig {
   botUserId?: string;
   /** WebSocket reconnect interval in ms (default: 5000) */
   reconnectIntervalMs?: number;
+  heartbeatIntervalMs?: number;
+  heartbeatTimeoutMs?: number;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -177,7 +179,14 @@ export class MattermostPlugin implements IMPlugin {
   private _ws: WebSocket | null = null;
   private _botUserId: string | null = null;
   private _reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+  private _heartbeatTimer: ReturnType<typeof setInterval> | null = null;
   private _stopped = false;
+  private _lastWsOpenAt = 0;
+  private _lastWsMessageAt = 0;
+  private _lastHeartbeatSentAt = 0;
+  private _lastHeartbeatAckAt = 0;
+  private _wsHealthy = false;
+  private _subscriptionHealthy = false;
 
   constructor(config: MattermostConfig) {
     this._config = config;
@@ -207,6 +216,10 @@ export class MattermostPlugin implements IMPlugin {
       clearTimeout(this._reconnectTimer);
       this._reconnectTimer = null;
     }
+    if (this._heartbeatTimer) {
+      clearInterval(this._heartbeatTimer);
+      this._heartbeatTimer = null;
+    }
     if (this._ws) {
       this._ws.close();
       this._ws = null;
@@ -226,6 +239,24 @@ export class MattermostPlugin implements IMPlugin {
 
   onMessage(handler: (msg: IncomingMessage) => void): void {
     this._handlers.push(handler);
+  }
+
+  getConnectionHealth(): {
+    wsHealthy: boolean;
+    subscriptionHealthy: boolean;
+    lastWsOpenAt: number;
+    lastWsMessageAt: number;
+    lastHeartbeatSentAt: number;
+    lastHeartbeatAckAt: number;
+  } {
+    return {
+      wsHealthy: this._wsHealthy,
+      subscriptionHealthy: this._subscriptionHealthy,
+      lastWsOpenAt: this._lastWsOpenAt,
+      lastWsMessageAt: this._lastWsMessageAt,
+      lastHeartbeatSentAt: this._lastHeartbeatSentAt,
+      lastHeartbeatAckAt: this._lastHeartbeatAckAt,
+    };
   }
 
   private _debugLog(payload: Record<string, unknown>): void {
@@ -282,9 +313,13 @@ export class MattermostPlugin implements IMPlugin {
 
     const ws = new WebSocket(wsUrl);
     this._ws = ws;
+    this._wsHealthy = false;
+    this._subscriptionHealthy = false;
 
     ws.addEventListener('open', () => {
-      // Authenticate the WebSocket connection
+      this._lastWsOpenAt = Date.now();
+      this._wsHealthy = true;
+      this._startHeartbeat();
       ws.send(JSON.stringify({
         seq: 1,
         action: 'authentication_challenge',
@@ -293,11 +328,19 @@ export class MattermostPlugin implements IMPlugin {
     });
 
     ws.addEventListener('message', (event) => {
+      this._lastWsMessageAt = Date.now();
+      this._subscriptionHealthy = true;
       this._handleWsMessage(event.data as string);
     });
 
     ws.addEventListener('close', () => {
       this._ws = null;
+      this._wsHealthy = false;
+      this._subscriptionHealthy = false;
+      if (this._heartbeatTimer) {
+        clearInterval(this._heartbeatTimer);
+        this._heartbeatTimer = null;
+      }
       if (!this._stopped) {
         const interval = this._config.reconnectIntervalMs ?? 5000;
         this._reconnectTimer = setTimeout(() => {
@@ -312,12 +355,52 @@ export class MattermostPlugin implements IMPlugin {
     });
   }
 
+  private _startHeartbeat(): void {
+    if (this._heartbeatTimer) {
+      clearInterval(this._heartbeatTimer);
+    }
+
+    const interval = this._config.heartbeatIntervalMs ?? 5000;
+    const timeout = this._config.heartbeatTimeoutMs ?? interval * 3;
+
+    this._heartbeatTimer = setInterval(() => {
+      if (!this._ws) return;
+
+      const now = Date.now();
+      this._lastHeartbeatSentAt = now;
+      try {
+        this._ws.send(JSON.stringify({ seq: now, action: 'ping' }));
+      } catch {
+        this._forceReconnect();
+        return;
+      }
+
+      const lastActivity = Math.max(this._lastWsMessageAt, this._lastHeartbeatAckAt, this._lastWsOpenAt);
+      if (now - lastActivity > timeout) {
+        this._forceReconnect();
+      }
+    }, interval);
+  }
+
+  private _forceReconnect(): void {
+    if (!this._ws) return;
+    try {
+      this._ws.close();
+    } catch {
+      // ignore
+    }
+  }
+
   private _handleWsMessage(raw: string): void {
     let event: Record<string, unknown>;
     try {
       event = JSON.parse(raw) as Record<string, unknown>;
     } catch {
       return;
+    }
+
+    if (typeof event.seq_reply === 'number' || event.status === 'OK') {
+      this._lastHeartbeatAckAt = Date.now();
     }
 
     if (event.event !== 'posted') return;
@@ -332,10 +415,8 @@ export class MattermostPlugin implements IMPlugin {
       return;
     }
 
-    // Ignore messages from the bot itself
     if (post.user_id === this._botUserId) return;
 
-    // Only handle messages in the configured channel or threads in it
     const channelId = post.channel_id as string | undefined;
     if (channelId !== this._config.channelId) return;
 
@@ -397,6 +478,18 @@ export class MattermostPlugin implements IMPlugin {
       body: JSON.stringify({
         id: messageId,
         message: this._toText(content),
+      }),
+    });
+  }
+
+  async sendTyping(target: MessageTarget): Promise<void> {
+    await this._apiRequest('/api/v4/posts', {
+      method: 'POST',
+      body: JSON.stringify({
+        channel_id: target.channelId ?? this._config.channelId,
+        ...(target.threadId ? { root_id: target.threadId } : {}),
+        message: '',
+        props: { typing: true },
       }),
     });
   }
