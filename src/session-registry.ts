@@ -85,9 +85,29 @@ export class SessionRegistry {
     if (s.initState === 'initializing') throw new Error('SESSION_BUSY');
   }
 
+  private _syncIdleRuntimeState(s: Session): void {
+    if (s.status !== 'idle' && s.status !== 'attach_pending') {
+      return;
+    }
+
+    if (s.status === 'attach_pending') {
+      if (s.imWorkerPid == null) {
+        s.runtimeState = 'cold';
+      } else if (s.runtimeState === 'waiting_approval' || s.runtimeState === 'running' || s.runtimeState === 'ready') {
+        // keep current attach_pending sub-state
+      } else {
+        s.runtimeState = 'ready';
+      }
+      return;
+    }
+
+    s.runtimeState = s.imWorkerPid == null ? 'cold' : 'ready';
+  }
+
   private _applyTransition(s: Session, event: Parameters<SessionStateMachine['transition']>[0]): void {
     const sm = new SessionStateMachine(s.status);
     const from = s.status;
+    const previousRuntimeState = s.runtimeState;
     try {
       sm.transition(event);
     } catch {
@@ -95,13 +115,13 @@ export class SessionRegistry {
       throw new Error(INVALID_STATE_TRANSITION);
     }
     s.status = sm.current;
-    s.runtimeState = this._runtimeStateForStatus(s.status);
+    s.runtimeState = this._runtimeStateForStatus(s.status, previousRuntimeState);
     s.revision += 1;
     s.lastActivityAt = new Date();
     debugLog({ event: 'transition', sessionName: s.name, from, to: s.status, trigger: event, revision: s.revision });
   }
 
-  private _runtimeStateForStatus(status: Session['status']): Session['runtimeState'] {
+  private _runtimeStateForStatus(status: Session['status'], previousRuntimeState?: Session['runtimeState']): Session['runtimeState'] {
     switch (status) {
       case 'im_processing':
         return 'running';
@@ -111,8 +131,16 @@ export class SessionRegistry {
         return 'attached_terminal';
       case 'takeover_pending':
         return 'takeover_pending';
+      case 'recovering':
+        return 'recovering';
+      case 'error':
+        return 'error';
+      case 'attach_pending':
+        if (previousRuntimeState === 'waiting_approval') return 'waiting_approval';
+        if (previousRuntimeState === 'running') return 'running';
+        return 'ready';
       default:
-        return 'idle';
+        return 'cold';
     }
   }
 
@@ -127,7 +155,7 @@ export class SessionRegistry {
       status: 'idle',
       lifecycleStatus: 'active',
       initState: 'uninitialized',
-      runtimeState: 'idle',
+      runtimeState: 'cold',
       revision: 0,
       spawnGeneration: 0,
       attachedPid: null,
@@ -157,7 +185,7 @@ export class SessionRegistry {
       status: 'idle',
       lifecycleStatus: 'active',
       initState: 'initialized', // external session already initialized
-      runtimeState: 'idle',
+      runtimeState: 'cold',
       revision: 0,
       spawnGeneration: 0,
       attachedPid: null,
@@ -242,11 +270,49 @@ export class SessionRegistry {
     s.lifecycleStatus = 'stale';
   }
 
+  markWorkerReady(name: string, workerPid: number): void {
+    const s = this._getOrThrow(name);
+    this._guardLifecycle(s);
+    s.imWorkerPid = workerPid;
+    s.status = 'idle';
+    s.runtimeState = 'ready';
+    s.revision += 1;
+    s.lastActivityAt = new Date();
+    debugLog({ event: 'worker_ready', sessionName: s.name, pid: workerPid, revision: s.revision });
+  }
+
+  markWorkerStopped(name: string): void {
+    const s = this._getOrThrow(name);
+    this._guardLifecycle(s);
+    s.imWorkerPid = null;
+    if (s.status === 'recovering') {
+      s.runtimeState = 'recovering';
+    } else if (s.status === 'error') {
+      s.runtimeState = 'error';
+    } else {
+      s.status = 'idle';
+      s.runtimeState = 'cold';
+    }
+    s.revision += 1;
+    s.lastActivityAt = new Date();
+    debugLog({ event: 'worker_stopped', sessionName: s.name, revision: s.revision });
+  }
+
+  markRecovering(name: string): void {
+    const s = this._getOrThrow(name);
+    this._guardLifecycle(s);
+    s.status = 'recovering';
+    s.runtimeState = 'recovering';
+    s.revision += 1;
+    s.lastActivityAt = new Date();
+    debugLog({ event: 'worker_recovering', sessionName: s.name, revision: s.revision });
+  }
+
   markError(name: string, _reason?: string): void {
     const s = this._getOrThrow(name);
     // Force to error state regardless of current state
     s.status = 'error';
-    s.runtimeState = 'idle';
+    s.runtimeState = 'error';
     s.revision += 1;
     s.lastActivityAt = new Date();
   }
@@ -318,13 +384,14 @@ export class SessionRegistry {
     this._guardLifecycle(s);
     this._applyTransition(s, 'attach_exit_normal');
     s.attachedPid = null;
+    this._syncIdleRuntimeState(s);
   }
 
   markImProcessing(name: string, workerPid?: number): void {
     const s = this._getOrThrow(name);
     this._guardLifecycle(s);
-    this._applyTransition(s, 'im_message_received');
     if (workerPid !== undefined) s.imWorkerPid = workerPid;
+    this._applyTransition(s, 'im_message_received');
   }
 
   markImDone(name: string): void {
@@ -332,17 +399,32 @@ export class SessionRegistry {
     this._guardLifecycle(s);
     if (s.status === 'im_processing') {
       this._applyTransition(s, 'message_completed');
+      this._syncIdleRuntimeState(s);
     } else if (s.status === 'attach_pending') {
-      // IM done while attach was waiting → transition to attached
+      const hadWorker = s.imWorkerPid != null;
       this._applyTransition(s, 'im_message_completed_and_worker_stopped');
+      s.imWorkerPid = null;
+      if (hadWorker) {
+        s.runtimeState = 'attached_terminal';
+      }
     }
-    s.imWorkerPid = null;
   }
 
   markAttachPending(name: string): void {
     const s = this._getOrThrow(name);
     this._guardLifecycle(s);
+
+    if (s.status === 'idle') {
+      s.status = 'attach_pending';
+      s.runtimeState = s.imWorkerPid == null ? 'cold' : 'ready';
+      s.revision += 1;
+      s.lastActivityAt = new Date();
+      debugLog({ event: 'transition', sessionName: s.name, from: 'idle', to: s.status, trigger: 'attach_start', revision: s.revision });
+      return;
+    }
+
     this._applyTransition(s, 'attach_start');
+    this._syncIdleRuntimeState(s);
   }
 
   markAttachResumed(name: string): void {
@@ -350,6 +432,8 @@ export class SessionRegistry {
     this._guardLifecycle(s);
     if (s.status === 'attach_pending') {
       this._applyTransition(s, 'im_message_completed_and_worker_stopped');
+      s.imWorkerPid = null;
+      s.runtimeState = 'attached_terminal';
     }
   }
 

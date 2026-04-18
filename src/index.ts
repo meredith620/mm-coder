@@ -283,7 +283,7 @@ async function handleAttach(args: Record<string, string | undefined>) {
     status: (sessionSummary.status as Session['status']) ?? 'idle',
     lifecycleStatus: (sessionSummary.lifecycleStatus as Session['lifecycleStatus']) ?? 'active',
     initState,
-    runtimeState: (sessionSummary.runtimeState as Session['runtimeState']) ?? (typeof sessionSummary.status === 'string' && sessionSummary.status === 'attached' ? 'attached_terminal' : 'idle'),
+    runtimeState: (sessionSummary.runtimeState as Session['runtimeState']) ?? (typeof sessionSummary.status === 'string' && sessionSummary.status === 'attached' ? 'attached_terminal' : 'cold'),
     revision: 0,
     spawnGeneration: 0,
     attachedPid: null,
@@ -410,6 +410,14 @@ async function handleTakeoverCancel(args: Record<string, string | undefined>) {
   console.log(`Takeover for '${name}' cancelled`);
 }
 
+function isBusyRuntimeState(runtimeState: string | undefined): boolean {
+  return runtimeState === 'running'
+    || runtimeState === 'waiting_approval'
+    || runtimeState === 'attached_terminal'
+    || runtimeState === 'takeover_pending'
+    || runtimeState === 'recovering';
+}
+
 async function handleStatus(args: Record<string, string | undefined>) {
   const name = args.name;
 
@@ -431,11 +439,19 @@ async function handleStatus(args: Record<string, string | undefined>) {
     if (!s) {
       throw new Error(`Session not found: ${name}`);
     }
-    console.log(JSON.stringify(s, null, 2));
+    const runtimeState = s.runtimeState as string | undefined;
+    const busy = isBusyRuntimeState(runtimeState);
+    console.log(JSON.stringify({
+      ...s,
+      busy,
+      idle: !busy,
+    }, null, 2));
   } else {
     console.log(`Sessions: ${sessions.length}`);
     for (const s of sessions) {
-      console.log(`  ${s.name} (${s.status})`);
+      const runtimeState = (s.runtimeState as string | undefined) ?? (s.status === 'attached' ? 'attached_terminal' : 'cold');
+      const busy = isBusyRuntimeState(runtimeState);
+      console.log(`  ${s.name} (${s.status}, runtime=${runtimeState}, ${busy ? 'busy' : 'idle'})`);
     }
   }
 }

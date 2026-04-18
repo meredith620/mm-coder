@@ -1,7 +1,19 @@
 import * as fs from 'fs';
 import * as path from 'path';
-import type { Session, SessionStatus } from './types.js';
+import type { Session, SessionStatus, RuntimeState } from './types.js';
 import type { SessionRegistry } from './session-registry.js';
+
+function deriveRuntimeStateFromStatus(status: SessionStatus): RuntimeState {
+  switch (status) {
+    case 'im_processing':     return 'running';
+    case 'approval_pending':  return 'waiting_approval';
+    case 'attached':          return 'attached_terminal';
+    case 'takeover_pending':  return 'takeover_pending';
+    case 'recovering':        return 'recovering';
+    case 'error':             return 'error';
+    default:                  return 'cold';
+  }
+}
 
 // States that cannot survive a daemon restart cleanly
 const RECOVER_STATES = new Set<SessionStatus>([
@@ -71,7 +83,7 @@ export class PersistenceStore {
         status,
         lifecycleStatus: (p.lifecycleStatus as Session['lifecycleStatus']) ?? 'active',
         initState: (p.initState as Session['initState']) ?? 'uninitialized',
-        runtimeState: status === 'attached' ? 'attached_terminal' : status === 'im_processing' ? 'running' : status === 'approval_pending' ? 'waiting_approval' : status === 'takeover_pending' ? 'takeover_pending' : 'idle',
+        runtimeState: deriveRuntimeStateFromStatus(status),
         revision: p.revision ?? 0,
         spawnGeneration: p.spawnGeneration ?? 0,
         attachedPid: null,
