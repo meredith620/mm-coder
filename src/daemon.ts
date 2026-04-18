@@ -4,6 +4,7 @@ import { AclManager } from './acl-manager.js';
 import { PersistenceStore } from './persistence.js';
 import { IMMessageDispatcher } from './im-message-dispatcher.js';
 import { IMWorkerManager } from './im-worker-manager.js';
+import { ApprovalManager } from './approval-manager.js';
 import { getIMPluginFactory, getDefaultIMPluginName } from './plugins/im/registry.js';
 import { getCLIPlugin, getDefaultCLIPluginName } from './plugins/cli/registry.js';
 import type { IMPlugin } from './plugins/types.js';
@@ -32,6 +33,7 @@ export class Daemon {
   private _imPlugins = new Map<string, IMPlugin>();
   private _imDispatcher: IMMessageDispatcher | null = null;
   private _imWorkerManager: IMWorkerManager | null = null;
+  private _approvalManager: ApprovalManager | null = null;
   private _defaultCLIPluginName: string;
 
   private _debugLog(payload: Record<string, unknown>): void {
@@ -47,6 +49,13 @@ export class Daemon {
     this._store = opts.persistencePath ? new PersistenceStore(opts.persistencePath) : null;
     this.registry = new SessionRegistry(this._store ?? undefined);
     this._acl = new AclManager();
+    this._approvalManager = new ApprovalManager({
+      autoAllowCapabilities: ['read_only'],
+      autoAskCapabilities: ['file_write'],
+      autoDenyCapabilities: ['shell_dangerous', 'network_destructive'],
+      autoDenyPatterns: [],
+      timeoutSeconds: 300,
+    });
     this._defaultCLIPluginName = opts.defaultCLIPluginName ?? getDefaultCLIPluginName();
     this._registerHandlers();
 
@@ -95,19 +104,19 @@ export class Daemon {
       return;
     }
 
-    this._imWorkerManager = new IMWorkerManager((session) => getCLIPlugin(session.cliPlugin), this.registry);
+    this._imWorkerManager = new IMWorkerManager((session: Session) => getCLIPlugin(session.cliPlugin), this.registry);
 
       this._imDispatcher = new IMMessageDispatcher({
       registry: this.registry,
       imPlugin: this._imPlugin!,
-      imPluginResolver: (message) => this._getIMPluginOrThrow(message.plugin ?? this._imPluginName ?? getDefaultIMPluginName()),
+      imPluginResolver: (message: { plugin?: string }) => this._getIMPluginOrThrow(message.plugin ?? this._imPluginName ?? getDefaultIMPluginName()),
       imTarget: {
         plugin: this._imPluginName ?? getDefaultIMPluginName(),
         threadId: '',
       },
-      cliPluginResolver: (session) => getCLIPlugin(session.cliPlugin),
+      workerManager: this._imWorkerManager,
       pollIntervalMs: 500,
-      onSessionImDone: (sessionName) => {
+      onSessionImDone: (sessionName: string) => {
         this._debugLog({ event: 'im_session_done', sessionName, sessionStatus: this.registry.get(sessionName)?.status });
         if (this._store) void this._store.flush();
         this._server.pushEventToAttachWaiter(sessionName, {
@@ -275,7 +284,7 @@ export class Daemon {
     const lines = [
       `**会话：** \`${session.name}\``,
       `**状态：** ${session.status}`,
-      `**运行态：** ${session.runtimeState ?? 'idle'}`,
+      `**运行态：** ${session.runtimeState ?? 'cold'}`,
       `**CLI 插件：** ${session.cliPlugin}`,
       `**工作目录：** ${session.workdir}`,
       `**绑定 thread：** ${binding?.threadId ?? '未绑定'}`,
@@ -384,14 +393,22 @@ export class Daemon {
       return;
     }
 
-    if (session.attachedPid) {
+    await this._approvalManager?.cancelForTakeover(session.sessionId);
+
+    if (session.status === 'attached' && session.attachedPid) {
       try {
         process.kill(session.attachedPid, 'SIGTERM');
       } catch {
         // ignore missing process; we still release session below
       }
     }
+
+    if (session.status === 'attached') {
+      this.registry.requestTakeover(sessionName, msg.userId);
+    }
+
     this.registry.completeTakeover(sessionName);
+    this._approvalManager?.invalidateSessionCache(session.sessionId);
     if (this._store) void this._store.flush();
     this._server.pushEventToAttachWaiter(sessionName, {
       type: 'event',
@@ -685,7 +702,7 @@ export class Daemon {
 
       const updated = this.registry.get(name)!;
       if (updated.status === 'attach_pending') {
-        // Register socket so markDetached can push session_resume event
+        // Register socket so markDetached/IM completion can push session_resume event
         if (socket) this._server.registerAttachWaiter(name, socket);
         return { waitRequired: true, session: this._serializeSession(updated) };
       }
