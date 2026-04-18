@@ -1,6 +1,6 @@
 # TODO
 
-Review 产出的待解决问题，按优先级排列。
+mm-coder (Multi-modal Coder) 的 review 产出待解决问题，按优先级排列。
 
 > 未完成项按 P1 → P2 → P3 处理；其中 P1 为实现前阻塞项。
 
@@ -37,15 +37,15 @@ Review 产出的待解决问题，按优先级排列。
 
 - [ ] **initState 懒初始化闭环**：在 `initialized` 前禁止 `--resume`，首次 attach/IM 触发懒初始化（first-writer-wins）；其他 writer 返回 `SESSION_BUSY`
   - 对应 SPEC §3.2 `initState` 字段、§3.6.1 first-writer-wins 规则
-- [ ] **lifecycleStatus 与 runtimeStatus 解耦**：两者独立迁移，`archived` session 禁止进入运行态；`initState` 与两者独立演进
+- [ ] **lifecycleStatus 与 runtimeState 解耦**：两者独立迁移，`archived` session 禁止进入运行态；`initState` 与两者独立演进
   - 对应 SPEC §9 状态关系说明
 
 ### 并发原子性与竞态裁决（SPEC §3.6.1）
 
 - [ ] **会话级锁 + revision CAS**：所有 session 状态变更在单 session 锁内执行；提交时基于 `revision` CAS；冲突返回 `SESSION_BUSY`
   - 对应 SPEC §3.6.1 "原子机制" 小节
-- [ ] **attach 优先于 IM**：idle 态并发到达时 attach 优先，IM 入队；attach 期间 IM 不入队；attach_exit 后重置 IM 队列处理
-  - 对应 SPEC §3.6.1 "attach 优先" 规则
+- [ ] **attach 优先于 IM**：`idle` 下并发到达时 attach 优先；attached/takeover_pending 时 IM 普通消息默认直接拒绝；`attach_pending` 期间队列冻结；不得继续保留旧的“attached 期间默认入队”语义
+  - 对应 SPEC §3.6.1 attach 优先与 §3.9 当前常驻 worker 语义
 - [ ] **spawnGeneration 防重**：pre-warm 与 lazy spawn 使用 `spawnGeneration` 防双 worker；`imWorkerPid` 唯一性由 generation 保证
   - 对应 SPEC §3.6.1 "worker 唯一性" 小节
 - [ ] **approval → takeover 优先级**：approval_pending 收到 takeover 时，先 cancel approval 再进入 takeover 流
@@ -157,6 +157,7 @@ Review 产出的待解决问题，按优先级排列。
 
 - [x] 补充 `mm-coder tui`：通过 IPC 连接 daemon，提供多 session 总览和审批状态监控
 - [x] 明确 TUI 与 attach 的边界：TUI 仅做控制台，不承载 AI CLI 交互
+- [ ] TUI / status / IM 文案统一采用新的 runtimeState 语义（cold / ready / running / waiting_approval / attached_terminal / takeover_pending / recovering / error）
 
 ### IPC
 
@@ -169,7 +170,7 @@ Review 产出的待解决问题，按优先级排列。
 
 ### 排队消息
 
-- [x] 定义终端 detach 后排队消息的自动处理行为 — 已在 §3.9 定版：attached 期间入队，detach 后 FIFO 自动处理
+- [x] 定义终端 detach 后排队消息的自动处理行为 — 旧单轮语义已被常驻 worker 设计替代；当前定版见 §3.9：attached/takeover_pending 时普通 IM 文本默认拒绝，不再沿用“attached 期间默认入队”
 - [x] 定义 pending message 的恢复语义：daemon 重启后是重放、丢弃还是标记待确认 — 已在 §3.8/§3.9 定版：默认 replay，高风险降级 confirm
 
 ### 权限配置归属
@@ -181,11 +182,22 @@ Review 产出的待解决问题，按优先级排列。
 - [x] 对齐 IM 命令和 CLI 命令的参数格式 — 已在 §3.7 增加 CLI⇄IPC 命令参数对齐表
 - [x] 增加 `mm-coder import <session-id> [--name] [--workdir]` 命令，支持导入外部启动的 Claude Code session — 已在 §3.5/§3.7 定版
 
-### 可观测性
+### Busy/Idle 与执行语义
 
-- [x] 定义日志策略：级别、输出位置、关键操作审计日志 — 已在 §6 定版：daemon.log（结构化）+ audit.log（高风险操作），含 correlationId/requestId/operatorId
-- [x] 增加高风险操作审计日志：审批、接管、删除 session、危险工具调用
+- [ ] **busy/idle 三层模型落地**：实现 `status` / `runtimeState` / 执行补充字段（如 `activeMessageId`、`lastTurnOutcome`、`interruptReason`）的分层真值
+  - 对应 SPEC §2.6、§3.2、§9，以及 `docs/STATE-INVARIANTS.md`
+- [ ] **busy/idle 对外派生一致性**：CLI / IM / TUI 对 busy/idle 的二值派生统一为 `busy = running|waiting_approval|attached_terminal|takeover_pending|recovering`、`idle = cold|ready`
+  - 对应 `docs/STATE-INVARIANTS.md` 与 `docs/IMPL-SLICES.resident-worker-tdd.md` R10
+- [ ] **typing indicator 绑定 busy 状态**：当 Mattermost 会话处于 `running` 时按节流发送 typing；`waiting_approval`、`ready`、`cold`、`recovering` 不发送；状态切换时立即停止续发
+  - 对应 SPEC §2.5、§4.1、§4.1.1（新增设计）与 `docs/EVENT-SEMANTICS.md`
 
-### Session 生命周期
+### Mattermost WebSocket 健壮性
+
+- [ ] **WebSocket 逻辑活性检测**：不能只依赖底层 TCP 重连或浏览器/WebSocket 对象存活；需要应用层 heartbeat/ack/lastMessageAt 监测，识别“TCP 已恢复但 WS 逻辑失活”的半断链场景
+  - 对应 SPEC §2.7（新增设计）
+- [ ] **WebSocket 主动自愈**：当超过心跳窗口未收到 Mattermost 事件或 heartbeat ack 时，主动 close 当前 WS 并重建，而不是无限信任现有连接
+  - 对应 SPEC §2.7（新增设计）
+- [ ] **REST/WS 双通道健康模型**：Mattermost 插件应分别维护 REST 可用性与 WS 订阅活性，禁止只因 REST 正常就判定“IM 连接正常”
+  - 对应 SPEC §2.7（新增设计）
 
 - [x] 定义 session 清理策略：TTL / 手动归档 / 最大数量限制 — 已在 §9 定版：TTL 标记 stale 非删除，手动归档/删除，运行中 session 不受 TTL 影响

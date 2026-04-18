@@ -1,4 +1,4 @@
-# mm-coder
+# mm-coder (Multi-modal Coder)
 
 AI CLI 会话桥接工具 — 管理多个 AI CLI 会话，支持终端直接交互和 IM 远程交互。
 
@@ -9,10 +9,11 @@ AI CLI 会话桥接工具 — 管理多个 AI CLI 会话，支持终端直接交
 ## 核心特性
 
 - **终端零中间层** — attach 时直接运行 AI CLI，体验与原生完全一致
-- **IM 远程续接** — 离开电脑后通过 Mattermost 继续推进任务
+- **IM 常驻会话 worker** — 每个活跃 IM session 维护一个常驻 Claude 进程，后续消息通过 stdin 连续投递
 - **终端优先 + 接管** — 终端 attach 时 IM 普通消息会被拒绝，可用 takeover 请求或强制接管
 - **多会话并行** — 同时管理多个独立会话，终端和 IM 各自操作
-- **权限审批转发** — 终端不在时，权限请求自动转发到 IM 审批
+- **Mattermost 连接自愈** — WebSocket 需做应用层活性检测与主动重连，避免“TCP 恢复但订阅逻辑已断”的假活状态
+- **状态与 typing 语义清晰** — 区分 `cold / ready / running / waiting_approval / attached_terminal` 等运行态，并仅在真正 `running` 时发送 typing 提示
 - **插件化扩展** — IM 端（Mattermost / Slack / Discord）和 CLI 端（Claude Code / Codex / Gemini）均可通过插件扩展
 
 ## 使用流程
@@ -28,6 +29,8 @@ mm-coder attach bug-fix                     # 直接进入 Claude Code
 
 # IM 远程交互
 # `/open <name>` 定位到对应 thread
+# session 首次被 IM 使用时，daemon 懒启动一个常驻 Claude worker
+# 后续 thread 中的每条消息都会写入同一个 worker 的 stdin
 # attached 时 IM 普通消息会被拒绝，并提示使用 `/takeover <name>`
 # `/takeover <name>` 请求终端释放；`/takeover-force <name>` 立即接管
 
@@ -100,11 +103,17 @@ mm-coder attach bug-fix                     # 再次进入，自动 resume
 Session-based 混合方案：
 
 - **终端**：CLI 插件负责构造 attach 命令，默认实现为 `claude --resume <id>` / `claude --session-id <id>`
-- **IM**：daemon 根据 session 的 `cliPlugin` 动态选择 CLI 插件，执行 `buildIMMessageCommand()`
-- **路由**：IM 回复目标优先使用消息自身的 `plugin/channelId/threadId`
-- **互斥**：终端 attach 时 IM 普通消息会被拒绝；可通过 takeover 交接控制权
+- **IM**：daemon 为每个活跃 session 维护一个常驻 `claude -p --input-format stream-json --output-format stream-json` worker，消息经队列串行后写入同一个 worker 的 stdin
+- **流式输出**：daemon 持续消费 worker stdout 事件流，并把增量内容回传到 IM thread
+- **运行态**：设计上区分 `cold / ready / running / waiting_approval / attached_terminal / takeover_pending / recovering / error`，不再简单等同于 session status
+- **typing 提示**：作为 `runtimeState=running` 的派生行为，仅在真正执行中按节流发送
+- **连接健壮性**：Mattermost WebSocket 通过应用层活性检测与主动重连维持长期稳定
 
 详见 [docs/SPEC.md](docs/SPEC.md)。
+
+## 致谢
+
+致谢 [claude-threads](https://github.com/anneschuth/claude-threads) -- 本项目在产品理念与架构设计上都深受其启发。
 
 ## 技术栈
 
@@ -113,7 +122,10 @@ Session-based 混合方案：
 
 ## 项目状态
 
-设计阶段。详见：
+设计收敛中：文档已切换到“常驻 IM worker”方案，代码实现将在下一阶段推进。详见：
 
-- [docs/SPEC.md](docs/SPEC.md) — 需求与设计规格
+- [docs/IMPL-SLICES.md](docs/IMPL-SLICES.md) — 当前实现切片入口
+- [docs/STATE-INVARIANTS.md](docs/STATE-INVARIANTS.md) — 状态不变量护栏
+- [docs/EVENT-SEMANTICS.md](docs/EVENT-SEMANTICS.md) — 事件语义护栏
+- [docs/MATTERMOST-GAPS.md](docs/MATTERMOST-GAPS.md) — Mattermost 当前实现与目标设计的差距清单
 - [docs/TODO.md](docs/TODO.md) — 待解决问题清单
