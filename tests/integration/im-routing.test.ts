@@ -515,6 +515,85 @@ describe('IMMessageDispatcher 动态 thread 路由', () => {
     expect(registry.get('sess-takeover')?.messageQueue[0].status).toBe('pending');
   }, 10000);
 
+  test('runtimeState=running 时按节流发送 typing，完成后停止续发', async () => {
+    const mockCli = path.join(tmpDir, 'typing-running.sh');
+    fs.writeFileSync(mockCli, [
+      '#!/bin/sh',
+      'while IFS= read -r line; do',
+      "  printf '%s\\n' '{\"type\":\"assistant\",\"message\":{\"content\":[{\"type\":\"text\",\"text\":\"working\"}]}}'",
+      '  sleep 0.35',
+      "  printf '%s\\n' '{\"type\":\"result\",\"subtype\":\"success\",\"result\":\"done\"}'",
+      'done',
+    ].join('\n'), { mode: 0o755 });
+
+    registry.create('sess-typing-running', { workdir: tmpDir, cliPlugin: 'mock' });
+
+    dispatcher = new IMMessageDispatcher({
+      registry,
+      imPlugin: mockIM,
+      imTarget: { plugin: 'mattermost', channelId: 'ch1', threadId: '' },
+      workerManager: new IMWorkerManager(new MockCLIPlugin(mockCli), registry),
+      pollIntervalMs: 20,
+      typingIntervalMs: 100,
+    });
+    dispatcher.start();
+
+    registry.enqueueIMMessage('sess-typing-running', {
+      text: 'long running',
+      dedupeKey: 'dk-typing-running',
+      plugin: 'mattermost',
+      threadId: 'thread-typing-running',
+      messageId: 'mid-typing-running',
+      userId: 'u-typing-running',
+    });
+
+    await new Promise(resolve => setTimeout(resolve, 120));
+    expect(registry.get('sess-typing-running')?.runtimeState).toBe('running');
+
+    await new Promise(resolve => setTimeout(resolve, 260));
+    expect(mockIM.typingCalls.length).toBeGreaterThan(1);
+    expect(mockIM.typingCalls.every(call => call.target.threadId === 'thread-typing-running')).toBe(true);
+
+    const callsAfterRunning = mockIM.typingCalls.length;
+    await new Promise(resolve => setTimeout(resolve, 400));
+    expect(registry.get('sess-typing-running')?.runtimeState).toBe('ready');
+
+    await new Promise(resolve => setTimeout(resolve, 300));
+    expect(mockIM.typingCalls.length).toBe(callsAfterRunning);
+  }, 10000);
+
+  test('非 running 状态不发送 typing', async () => {
+    const mockCli = path.join(tmpDir, 'typing-blocked.sh');
+    fs.writeFileSync(mockCli, '#!/bin/sh\nsleep 60\n', { mode: 0o755 });
+
+    const session = registry.create('sess-typing-blocked', { workdir: tmpDir, cliPlugin: 'mock' });
+    session.status = 'approval_pending';
+    session.runtimeState = 'waiting_approval';
+
+    dispatcher = new IMMessageDispatcher({
+      registry,
+      imPlugin: mockIM,
+      imTarget: { plugin: 'mattermost', channelId: 'ch1', threadId: '' },
+      workerManager: new IMWorkerManager(new MockCLIPlugin(mockCli), registry),
+      pollIntervalMs: 20,
+      typingIntervalMs: 100,
+    });
+    dispatcher.start();
+
+    registry.enqueueIMMessage('sess-typing-blocked', {
+      text: 'blocked',
+      dedupeKey: 'dk-typing-blocked',
+      plugin: 'mattermost',
+      threadId: 'thread-typing-blocked',
+      messageId: 'mid-typing-blocked',
+      userId: 'u-typing-blocked',
+    });
+
+    await new Promise(resolve => setTimeout(resolve, 400));
+    expect(mockIM.typingCalls).toHaveLength(0);
+    expect(registry.get('sess-typing-blocked')?.runtimeState).toBe('waiting_approval');
+  }, 10000);
+
   test('同一 session 多条消息 FIFO 串行处理', async () => {
     const mockCli = path.join(tmpDir, 'serial.sh');
     const outFile = path.join(tmpDir, 'serial-order.log');

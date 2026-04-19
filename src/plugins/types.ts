@@ -47,6 +47,11 @@ export interface IMPlugin {
   requestApproval(target: MessageTarget, request: ApprovalRequest): Promise<void>;
 
   /**
+   * Send a typing indicator when the IM platform supports it
+   */
+  sendTyping?(target: MessageTarget): Promise<void>;
+
+  /**
    * Graceful shutdown — close connections and release resources
    */
   disconnect?(): Promise<void>;

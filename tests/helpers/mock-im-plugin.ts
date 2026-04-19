@@ -7,12 +7,18 @@ interface SentRecord {
   content: MessageContent;
 }
 
+interface TypingRecord {
+  target: MessageTarget;
+  at: number;
+}
+
 export class MockIMPlugin implements IMPlugin {
   private _handlers: Array<(msg: IncomingMessage) => void> = [];
   sent: SentRecord[] = [];
   liveMessages = new Map<string, string>(); // messageId → text content
   liveMessageTargets = new Map<string, MessageTarget>();
   approvalRequests: ApprovalRequest[] = [];
+  typingCalls: TypingRecord[] = [];
   failCreateLiveMessage = false;
   createLiveMessageError = new Error('createLiveMessage failed');
 
@@ -56,5 +62,9 @@ export class MockIMPlugin implements IMPlugin {
 
   async requestApproval(target: MessageTarget, request: ApprovalRequest): Promise<void> {
     this.approvalRequests.push(request);
+  }
+
+  async sendTyping(target: MessageTarget): Promise<void> {
+    this.typingCalls.push({ target, at: Date.now() });
   }
 }

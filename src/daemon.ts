@@ -625,6 +625,16 @@ export class Daemon {
 
       this._checkAcl(actor, 'remove', session);
 
+      if (session.status === 'attached' || session.status === 'attach_pending' || session.status === 'takeover_pending') {
+        const e = new Error(`Cannot remove session '${name}' while status is ${session.status}`) as Error & { code: ErrorCode };
+        e.code = 'INVALID_STATE_TRANSITION';
+        throw e;
+      }
+
+      if (session.imWorkerPid != null) {
+        await this._imWorkerManager?.terminate(name);
+      }
+
       this.registry.remove(name);
       return {};
     });

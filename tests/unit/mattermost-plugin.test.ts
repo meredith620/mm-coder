@@ -379,15 +379,56 @@ describe('MattermostPlugin', () => {
     expect(after).toBeGreaterThanOrEqual(before);
   });
 
-  test('sendTyping 发送 typing 指示请求', async () => {
+  test('只有匹配当前 heartbeat seq 的 ack 才刷新 ack 时间戳', async () => {
+    vi.useFakeTimers();
+
+    fetchSpy = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => ({ id: 'bot-u1', username: 'bot' }),
+      text: async () => '',
+    });
+    vi.stubGlobal('fetch', fetchSpy);
+
+    const plugin = new MattermostPlugin({
+      url: BASE_URL,
+      token: TOKEN,
+      channelId: CHANNEL_ID,
+      heartbeatIntervalMs: 50,
+      heartbeatTimeoutMs: 500,
+    } as any);
+    await plugin.connect();
+    wsInstances[0].__emit('open');
+
+    vi.advanceTimersByTime(60);
+    const before = (plugin as any)._lastHeartbeatAckAt ?? 0;
+    wsInstances[0].__emit('message', { data: JSON.stringify({ seq_reply: 999999, status: 'OK' }) });
+    const afterWrongAck = (plugin as any)._lastHeartbeatAckAt ?? 0;
+    expect(afterWrongAck).toBe(before);
+
+    const sends = wsInstances[0].send.mock.calls.map(call => JSON.parse(call[0]));
+    const heartbeat = sends.find(payload => payload.action === 'ping');
+    expect(heartbeat).toBeTruthy();
+
+    wsInstances[0].__emit('message', { data: JSON.stringify({ seq_reply: heartbeat.seq, status: 'OK' }) });
+    const afterMatchedAck = (plugin as any)._lastHeartbeatAckAt ?? 0;
+    expect(afterMatchedAck).toBeGreaterThanOrEqual(before);
+
+    vi.useRealTimers();
+  });
+
+  test('sendTyping 调用官方 Mattermost typing API 路径', async () => {
     const plugin = new MattermostPlugin({ url: BASE_URL, token: TOKEN, channelId: CHANNEL_ID } as any);
-    await plugin.sendTyping({ plugin: 'mattermost', threadId: 'root1' } as any);
+    (plugin as any)._botUserId = 'bot-u1';
+    await plugin.sendTyping({ plugin: 'mattermost', channelId: 'ch-typing', threadId: 'root1' } as any);
 
     expect(fetchSpy).toHaveBeenCalledOnce();
     const [url, opts] = fetchSpy.mock.calls[0];
-    expect(url).toBe(`${BASE_URL}/api/v4/posts`);
+    expect(url).toBe(`${BASE_URL}/api/v4/users/bot-u1/typing`);
+    expect(opts.method).toBe('POST');
     const body = JSON.parse(opts.body);
-    expect(body.props?.typing).toBe(true);
+    expect(body.channel_id).toBe('ch-typing');
+    expect(body.parent_id).toBe('root1');
   });
   test('requestApproval 发送带 attachments 的消息', async () => {
     const plugin = new MattermostPlugin({ url: BASE_URL, token: TOKEN, channelId: CHANNEL_ID });

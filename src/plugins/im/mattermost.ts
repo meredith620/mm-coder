@@ -185,6 +185,7 @@ export class MattermostPlugin implements IMPlugin {
   private _lastWsMessageAt = 0;
   private _lastHeartbeatSentAt = 0;
   private _lastHeartbeatAckAt = 0;
+  private _lastHeartbeatSeq: number | null = null;
   private _wsHealthy = false;
   private _subscriptionHealthy = false;
 
@@ -368,6 +369,7 @@ export class MattermostPlugin implements IMPlugin {
 
       const now = Date.now();
       this._lastHeartbeatSentAt = now;
+      this._lastHeartbeatSeq = now;
       try {
         this._ws.send(JSON.stringify({ seq: now, action: 'ping' }));
       } catch {
@@ -399,7 +401,7 @@ export class MattermostPlugin implements IMPlugin {
       return;
     }
 
-    if (typeof event.seq_reply === 'number' || event.status === 'OK') {
+    if (typeof event.seq_reply === 'number' && event.seq_reply === this._lastHeartbeatSeq) {
       this._lastHeartbeatAckAt = Date.now();
     }
 
@@ -483,13 +485,12 @@ export class MattermostPlugin implements IMPlugin {
   }
 
   async sendTyping(target: MessageTarget): Promise<void> {
-    await this._apiRequest('/api/v4/posts', {
+    const userId = this.getBotUserId();
+    await this._apiRequest(`/api/v4/users/${userId}/typing`, {
       method: 'POST',
       body: JSON.stringify({
         channel_id: target.channelId ?? this._config.channelId,
-        ...(target.threadId ? { root_id: target.threadId } : {}),
-        message: '',
-        props: { typing: true },
+        ...(target.threadId ? { parent_id: target.threadId } : {}),
       }),
     });
   }

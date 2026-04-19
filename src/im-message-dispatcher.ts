@@ -28,6 +28,7 @@ export interface IMMessageDispatcherOptions {
   imTarget: MessageTarget;
   workerManager: IMWorkerManager;
   pollIntervalMs?: number;
+  typingIntervalMs?: number;
   maxRetries?: number;
   onSessionImDone?: (sessionName: string) => void;
 }
@@ -37,6 +38,7 @@ export interface IMMessageDispatcherOptions {
  * the resident worker one-by-one per session.
  */
 export class IMMessageDispatcher {
+  private static readonly TYPING_INTERVAL_MS = 3000;
   private _opts: IMMessageDispatcherOptions;
   private _running = false;
   private _timer: ReturnType<typeof setTimeout> | null = null;
@@ -186,6 +188,43 @@ export class IMMessageDispatcher {
     this._streamLoops.set(sessionName, loop);
   }
 
+  private _startTypingLoop(sessionName: string, message: QueuedMessage, session: Session): () => void {
+    const plugin = this._resolveIMPlugin(message, session);
+    if (typeof plugin.sendTyping !== 'function') {
+      return () => {};
+    }
+
+    const target = this._buildTarget(message);
+    let stopped = false;
+
+    const tick = async (): Promise<void> => {
+      if (stopped) {
+        return;
+      }
+
+      const current = this._opts.registry.get(sessionName);
+      if (!current || current.runtimeState !== 'running') {
+        return;
+      }
+
+      try {
+        await plugin.sendTyping!(target);
+      } catch (error) {
+        debugLog({ event: 'typing_failed', sessionName, messageId: message.messageId, error: (error as Error).message });
+      }
+    };
+
+    void tick();
+    const timer = setInterval(() => {
+      void tick();
+    }, this._opts.typingIntervalMs ?? IMMessageDispatcher.TYPING_INTERVAL_MS);
+
+    return () => {
+      stopped = true;
+      clearInterval(timer);
+    };
+  }
+
   private async _processNextMessage(sessionName: string): Promise<void> {
     const next = this._getNextPendingMessage(sessionName);
     if (!next) return;
@@ -219,10 +258,12 @@ export class IMMessageDispatcher {
       });
     });
 
+    let stopTyping = () => {};
+
     try {
       this._markMessageStatus(sessionName, message.messageId, 'running');
-      this._opts.registry.markImProcessing(sessionName);
       await this._opts.workerManager.ensureRunning(sessionName);
+      this._opts.registry.markImProcessing(sessionName);
 
       const proc = this._opts.workerManager.getProcess(sessionName);
       if (!proc) {
@@ -230,6 +271,7 @@ export class IMMessageDispatcher {
       }
 
       this._ensureStreamLoop(sessionName, proc);
+      stopTyping = this._startTypingLoop(sessionName, message, session);
       await this._opts.workerManager.sendMessage(sessionName, message.content);
       await turnDone;
       this._markMessageStatus(sessionName, message.messageId, 'completed');
@@ -241,6 +283,7 @@ export class IMMessageDispatcher {
       this._markMessageStatus(sessionName, message.messageId, 'failed');
       debugLog({ event: 'process_failed', sessionName, messageId: message.messageId, error: (err as Error).message });
     } finally {
+      stopTyping();
       const activeTurn = this._activeTurns.get(sessionName);
       if (activeTurn?.messageId === message.messageId) {
         this._activeTurns.delete(sessionName);

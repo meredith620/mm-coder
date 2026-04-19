@@ -1,4 +1,4 @@
-import { describe, test, expect, beforeEach, afterEach } from 'vitest';
+import { describe, test, expect, beforeEach, afterEach, vi } from 'vitest';
 import { Daemon } from '../../src/daemon.js';
 import { IPCClient } from '../../src/ipc/client.js';
 import * as path from 'path';
@@ -29,6 +29,38 @@ describe('Daemon CRUD commands', () => {
     const listRes = await client.send('list', {});
     expect(listRes.ok).toBe(true);
     expect((listRes.data!.sessions as any[]).some((s: any) => s.name === 'test')).toBe(true);
+  });
+
+  test('remove idle + cold session 成功删除', async () => {
+    await client.send('create', { name: 'remove-cold', workdir: '/tmp', cli: 'claude-code' });
+
+    const removeRes = await client.send('remove', { name: 'remove-cold' });
+    expect(removeRes.ok).toBe(true);
+    expect(daemon.registry.get('remove-cold')).toBeUndefined();
+  });
+
+  test('remove idle + ready session 会先 terminate worker 再删除 registry', async () => {
+    await client.send('create', { name: 'remove-ready', workdir: '/tmp', cli: 'claude-code' });
+    daemon.registry.markWorkerReady('remove-ready', 43210);
+
+    const terminateSpy = vi.fn().mockResolvedValue(undefined);
+    (daemon as any)._imWorkerManager = { terminate: terminateSpy };
+
+    const removeRes = await client.send('remove', { name: 'remove-ready' });
+    expect(removeRes.ok).toBe(true);
+    expect(terminateSpy).toHaveBeenCalledWith('remove-ready');
+    expect(daemon.registry.get('remove-ready')).toBeUndefined();
+  });
+
+  test('remove attached session 返回明确错误且不删除', async () => {
+    await client.send('create', { name: 'remove-attached', workdir: '/tmp', cli: 'claude-code' });
+    await client.send('attach', { name: 'remove-attached', pid: 9999 });
+
+    const removeRes = await client.send('remove', { name: 'remove-attached' });
+    expect(removeRes.ok).toBe(false);
+    expect(removeRes.error!.code).toBe('INVALID_STATE_TRANSITION');
+    expect(removeRes.error!.message).toContain('attached');
+    expect(daemon.registry.get('remove-attached')).toBeTruthy();
   });
 
   test('remove 后 list 不再包含该 session', async () => {

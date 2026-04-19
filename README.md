@@ -30,7 +30,8 @@ mm-coder attach bug-fix                     # 直接进入 Claude Code
 # IM 远程交互
 # `/open <name>` 会根据当前配置的 Mattermost `spaceStrategy`：
 # - `thread`：定位或创建 thread
-# - `channel`：定位或创建独立 channel
+# - `channel`：通过主 channel 索引入口定位或创建独立 **private channel**
+# `channel` 是 Mattermost 的可选模式，不替代默认 `thread`
 # session 首次被 IM 使用时，daemon 懒启动一个常驻 Claude worker
 # 后续消息都会写入同一个 worker 的 stdin
 # attached 时 IM 普通消息会被拒绝，并提示使用 `/takeover <name>`
@@ -87,7 +88,7 @@ mm-coder attach bug-fix                     # 再次进入，自动 resume
 | `url` | Mattermost 服务器地址 |
 | `token` | Bot 的 Personal Access Token |
 | `channelId` | 监听消息的频道 ID |
-| `spaceStrategy` | 新 session 的 Mattermost 会话空间策略：`thread`（默认）或 `channel`；仅影响未来新建的 session |
+| `spaceStrategy` | 新 session 的 Mattermost 会话空间策略：`thread`（默认）或 `channel`；`channel` 通过主 channel 作为统一索引入口并默认创建 private channel；remove/archive 默认优先 archive/解绑而不是硬删除；仅影响未来新建的 session |
 | `reconnectIntervalMs` | WebSocket 重连间隔（可选，默认 5000ms） |
 
 ## 插件开发
