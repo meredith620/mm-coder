@@ -15,6 +15,19 @@ import { randomUUID } from 'crypto';
 import * as fs from 'fs';
 
 
+function normalizeIncomingIMText(text: string): string {
+  const trimmed = text.trim();
+  if (!['继续', '继续执行', '请继续', '请继续执行', '接着做', '接着执行'].includes(trimmed)) {
+    return text;
+  }
+
+  return [
+    '继续上一个未完成任务。',
+    '不要只描述计划。',
+    '请继续实际执行，必要时继续调用工具完成调研、读取、修改、验证，并把关键进展回传到当前会话。',
+  ].join('\n');
+}
+
 export interface DaemonOptions {
   persistencePath?: string;
   imConfigPath?: string;
@@ -240,7 +253,7 @@ export class Daemon {
     }
     try {
       this.registry.enqueueIMMessage(session.name, {
-        text: msg.text,
+        text: normalizeIncomingIMText(msg.text),
         dedupeKey: msg.dedupeKey,
         plugin: msg.plugin,
         channelId: msg.channelId ?? channelId,

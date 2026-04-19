@@ -306,17 +306,19 @@ describe('Daemon IM 路由', () => {
     expect((mockIM.sent[0].content as any).text).toContain('已强制接管会话 demo-force');
   });
 
-  test('普通文本在 channel 模式下自动建 session 时记录 channel 绑定', async () => {
+  test('MM 短 continuation 文本会以扩写后的继续执行语义入队', async () => {
     const mockIM = new MockIMPlugin();
     (daemon as any)._imPlugin = mockIM;
     (daemon as any)._imPluginName = 'mattermost';
-    (daemon as any)._imPluginConfig = { spaceStrategy: 'channel', teamId: 'team-1' };
 
-    const session = (daemon as any)._getOrCreateSessionForConversation('channel-main-1', 'mattermost', 'channel');
+    const msg = makeMsg({ text: '继续', threadId: 'continue-thread' });
+    await (daemon as any)._handleIncomingIMMessage(msg, 'ch1');
+
+    const session = daemon.registry.getByIMThread('mattermost', 'continue-thread');
     expect(session).toBeTruthy();
-    const binding = session.imBindings.find((item: any) => item.plugin === 'mattermost');
-    expect(binding?.bindingKind).toBe('channel');
-    expect(binding?.channelId).toBe('channel-main-1');
+    expect(session!.messageQueue).toHaveLength(1);
+    expect(session!.messageQueue[0].content).toContain('继续上一个未完成任务');
+    expect(session!.messageQueue[0].content).toContain('不要只描述计划');
   });
 
 });
