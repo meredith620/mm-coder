@@ -1,6 +1,6 @@
 import * as net from 'net';
 import * as readline from 'readline';
-import { encodeRequest, decodeMessage, type IPCResponse, type IPCError } from './codec.js';
+import { encodeRequest, decodeMessage, type IPCResponse, type IPCError, type IPCEvent } from './codec.js';
 
 type SendResult =
   | { ok: true; data: Record<string, unknown> }
@@ -18,6 +18,7 @@ export class IPCClient {
   private _socket: net.Socket | null = null;
   private _rl: readline.Interface | null = null;
   private _pending: Map<string, { resolve: (r: SendResult) => void; reject: (e: Error) => void }> = new Map();
+  private _eventHandlers: Array<(event: IPCEvent) => void> = [];
 
   constructor(socketPath: string) {
     this._socketPath = socketPath;
@@ -65,15 +66,31 @@ export class IPCClient {
   }
 
   async close(): Promise<void> {
+    this._eventHandlers = [];
     this._rl?.close();
     this._socket?.destroy();
     this._socket = null;
     this._rl = null;
   }
 
+  async subscribe(onEvent: (event: IPCEvent) => void): Promise<void> {
+    this._eventHandlers.push(onEvent);
+    const response = await this.send('subscribe', {});
+    if (!response.ok) {
+      throw new Error(`Failed to subscribe: ${response.error.message}`);
+    }
+  }
+
   private _handleLine(line: string): void {
     let msg: ReturnType<typeof decodeMessage>;
     try { msg = decodeMessage(line); } catch { return; }
+
+    if (msg.type === 'event') {
+      for (const handler of this._eventHandlers) {
+        handler(msg);
+      }
+      return;
+    }
 
     if (msg.type !== 'response') return;
 

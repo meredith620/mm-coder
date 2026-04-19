@@ -1,5 +1,5 @@
 import { describe, test, expect } from 'vitest';
-import { renderSessionList } from '../../src/tui.js';
+import { renderSessionList, createTuiStateStore, renderTuiOverview, renderTuiDiagnostics } from '../../src/tui.js';
 
 describe('TUI 渲染器', () => {
   test('renderSessionList 正确格式化 session 信息', () => {
@@ -38,12 +38,122 @@ describe('TUI 渲染器', () => {
     expect(output).toContain('attached_terminal');
   });
 
-  test('recovering 与 error 状态在输出中可识别', () => {
-    const output = renderSessionList([
-      { name: 'sess3', status: 'recovering', workdir: '/tmp', lastActivityAt: new Date(), runtimeState: 'recovering' },
-      { name: 'sess4', status: 'error', workdir: '/tmp', lastActivityAt: new Date(), runtimeState: 'error' },
+
+  test('state store 可根据 session_state_changed 更新本地快照', () => {
+    const store = createTuiStateStore([
+      { name: 'demo', status: 'idle', workdir: '/tmp', lastActivityAt: new Date(), runtimeState: 'cold' } as any,
+    ]);
+
+    store.applyEvent({
+      event: 'session_state_changed',
+      data: {
+        name: 'demo',
+        status: 'im_processing',
+        runtimeState: 'running',
+        workdir: '/tmp',
+        lastActivityAt: new Date().toISOString(),
+      },
+    });
+
+    const sessions = store.list();
+    expect(sessions).toHaveLength(1);
+    expect(sessions[0].name).toBe('demo');
+    expect(sessions[0].status).toBe('im_processing');
+    expect(sessions[0].runtimeState).toBe('running');
+  });
+
+
+  test('renderTuiOverview 渲染 queue length 与高亮状态标记', () => {
+    const output = renderTuiOverview([
+      {
+        name: 'sess-approval',
+        status: 'approval_pending',
+        runtimeState: 'waiting_approval',
+        workdir: '/tmp/a',
+        lastActivityAt: new Date(),
+        queueLength: 2,
+      },
+      {
+        name: 'sess-attached',
+        status: 'attached',
+        runtimeState: 'attached_terminal',
+        workdir: '/tmp/b',
+        lastActivityAt: new Date(),
+        queueLength: 0,
+      },
+      {
+        name: 'sess-recovering',
+        status: 'recovering',
+        runtimeState: 'recovering',
+        workdir: '/tmp/c',
+        lastActivityAt: new Date(),
+        queueLength: 1,
+      },
     ] as any);
-    expect(output).toContain('recovering');
-    expect(output).toContain('error');
+
+    expect(output).toContain('QUEUE');
+    expect(output).toContain('sess-approval');
+    expect(output).toContain('2');
+    expect(output).toContain('[APPROVAL]');
+    expect(output).toContain('sess-attached');
+    expect(output).toContain('[ATTACHED]');
+    expect(output).toContain('sess-recovering');
+    expect(output).toContain('[RECOVERING]');
+  });
+
+
+  test('renderTuiDiagnostics 显示 busy/idle 派生与 Mattermost 健康摘要', () => {
+    const output = renderTuiDiagnostics([
+      {
+        name: 'busy-session',
+        status: 'im_processing',
+        runtimeState: 'running',
+        workdir: '/tmp/a',
+        lastActivityAt: new Date(),
+        queueLength: 1,
+        connectionHealth: { wsHealthy: true, subscriptionHealthy: true },
+      },
+      {
+        name: 'idle-session',
+        status: 'idle',
+        runtimeState: 'ready',
+        workdir: '/tmp/b',
+        lastActivityAt: new Date(),
+        queueLength: 0,
+        connectionHealth: { wsHealthy: false, subscriptionHealthy: false },
+      },
+    ] as any);
+
+    expect(output).toContain('busy-session');
+    expect(output).toContain('busy');
+    expect(output).toContain('idle-session');
+    expect(output).toContain('idle');
+    expect(output).toContain('ws=healthy');
+    expect(output).toContain('subscription=healthy');
+    expect(output).toContain('ws=down');
+    expect(output).toContain('subscription=down');
+  });
+
+  test('state store 更新事件时保留 connection health 摘要', () => {
+    const store = createTuiStateStore();
+
+    store.applyEvent({
+      event: 'session_state_changed',
+      data: {
+        name: 'diag',
+        status: 'idle',
+        runtimeState: 'ready',
+        workdir: '/tmp',
+        queueLength: 0,
+        connectionHealth: {
+          wsHealthy: true,
+          subscriptionHealthy: false,
+        },
+        lastActivityAt: new Date().toISOString(),
+      },
+    });
+
+    const sessions = store.list();
+    expect(sessions[0].connectionHealth).toEqual({ wsHealthy: true, subscriptionHealthy: false });
   });
 });
