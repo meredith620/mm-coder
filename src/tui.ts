@@ -39,7 +39,6 @@ const STATUS_LABELS: Record<SessionStatus, string> = {
   im_processing: 'im_processing',
   approval_pending: 'approval_pending',
   takeover_pending: 'takeover_pending',
-  recovering: 'recovering',
   error: 'error',
 };
 
@@ -235,7 +234,7 @@ export function renderTuiOverview(sessions: SessionSummary[]): string {
     const markers: string[] = [];
     if (s.status === 'approval_pending') markers.push('[APPROVAL]');
     if (s.status === 'attached') markers.push('[ATTACHED]');
-    if (s.status === 'recovering') markers.push('[RECOVERING]');
+    if (s.runtimeState === 'recovering') markers.push('[RECOVERING]');
     if (s.bindingKind) markers.push(`[${s.bindingKind}]`);
     const markerLabel = markers.join(' ');
     lines.push(`  ${s.name.padEnd(24)} ${runtimeLabel.padEnd(20)} ${queueLabel} ${markerLabel}`.trimEnd());

@@ -190,41 +190,46 @@ describe('ACL enforcement', () => {
     expect(state?.scope).toBe('session');
   });
 
-  test('IM session 级审批会写入 capability cache，后续同 operator+capability 自动放行', async () => {
-    await client.send('create', { name: 'approval-cache', workdir: '/tmp', cli: 'claude-code' }, {
+  test('IM reaction 审批可按 interaction message 决策', async () => {
+    const mockIM = new MockIMPlugin();
+    (daemon as any)._imPlugin = mockIM;
+    (daemon as any)._imPluginName = 'mattermost';
+    (daemon as any)._imPlugins.set('mattermost', mockIM);
+
+    await client.send('create', { name: 'approval-reaction', workdir: '/tmp', cli: 'claude-code' }, {
       actor: { source: 'cli', userId: 'owner-user' },
     });
-    const session = daemon.registry.get('approval-cache')!;
+    const session = daemon.registry.get('approval-reaction')!;
     const created = await (daemon as any)._approvalManager?.createPendingApproval({
       sessionId: session.sessionId,
-      messageId: 'msg-cache',
-      toolUseId: 'tool-cache',
+      messageId: 'msg-r',
+      toolUseId: 'tool-r',
       capability: 'file_write',
       operatorId: 'owner-user',
-      correlationId: 'corr-cache',
+      correlationId: 'corr-r',
     });
     expect(created).toBeDefined();
+    (daemon as any)._approvalManager.attachInteractionMessage(created.requestId, 'post-approval-1');
     (daemon as any)._acl.grantRole(session.sessionId, 'approver-user', 'approver');
 
-    await (daemon as any)._handleApprovalDecision({
+    await (daemon as any)._handleIncomingIMMessage({
       plugin: 'mattermost',
-      threadId: 'thread-cache',
+      channelId: 'ch1',
+      threadId: 'post-approval-1',
       isTopLevel: false,
       userId: 'approver-user',
-      text: `/approve ${created.requestId} session`,
-      messageId: 'im-cache',
+      text: '',
+      messageId: 'reaction-1',
       createdAt: new Date().toISOString(),
-      dedupeKey: 'dk-im-cache',
-    }, 'ch1', 'approved');
+      dedupeKey: 'reaction-1',
+      reaction: { action: 'added', emoji: '✅', postId: 'post-approval-1' },
+    }, 'ch1');
 
-    const result = await (daemon as any)._approvalManager.applyRules(
-      'Edit',
-      { path: '/tmp/cached.txt' },
-      'file_write',
-      { sessionId: session.sessionId, operatorId: 'owner-user' },
-    );
-    expect(result).toBe('allow');
+    const state = (daemon as any)._approvalManager.getApprovalState(created.requestId);
+    expect(state?.decision).toBe('approved');
+    expect(state?.scope).toBe('session');
   });
+
 });
 
 describe('takeover commands', () => {

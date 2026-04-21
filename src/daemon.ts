@@ -15,11 +15,23 @@ import type { ErrorCode } from './ipc/codec.js';
 import { randomUUID } from 'crypto';
 import * as fs from 'fs';
 
-
 function mockApprovalDecision(imPlugin: IMPlugin, requestId: string, decision: 'approved' | 'denied' | 'cancelled', scope: 'once' | 'session'): void {
   const maybeRecorder = imPlugin as IMPlugin & { recordApprovalDecision?: (requestId: string, decision: 'approved' | 'denied' | 'cancelled', scope?: 'once' | 'session') => void };
   maybeRecorder.recordApprovalDecision?.(requestId, decision, scope);
 }
+
+function approvalCommandHelp(): string {
+  return 'fallback：`/approve last once` `/approve last session` `/deny last` `/cancel last`';
+}
+
+function reactionToApprovalDecision(emoji: string): { decision: 'approved' | 'denied' | 'cancelled'; scope: 'once' | 'session' } | undefined {
+  if (emoji === '👍') return { decision: 'approved', scope: 'once' };
+  if (emoji === '✅') return { decision: 'approved', scope: 'session' };
+  if (emoji === '👎') return { decision: 'denied', scope: 'once' };
+  if (emoji === '⏹️') return { decision: 'cancelled', scope: 'once' };
+  return undefined;
+}
+
 
 export interface DaemonOptions {
   persistencePath?: string;
@@ -197,6 +209,12 @@ export class Daemon {
     if (!imPlugin) return;
 
     const trimmed = msg.text.trim();
+    if (msg.reaction?.action === 'added') {
+      const handled = await this._handleApprovalReaction(msg, channelId);
+      if (handled) {
+        return;
+      }
+    }
     const factory = getIMPluginFactory(msg.plugin);
 
     if (trimmed === '/help') {
@@ -320,33 +338,50 @@ export class Daemon {
     }
   }
 
-  private async _handleApprovalDecision(
+  private async _handleApprovalReaction(msg: IncomingMessage, channelId: string): Promise<boolean> {
+    if (!msg.reaction || !this._approvalManager) return false;
+    const mapped = reactionToApprovalDecision(msg.reaction.emoji);
+    if (!mapped) return false;
+
+    const state = this._approvalManager.getApprovalStateByInteractionMessageId(msg.reaction.postId);
+    if (!state) return false;
+
+    await this._finalizeApprovalDecision(msg, channelId, state.requestId, mapped.decision, mapped.scope);
+    return true;
+  }
+
+  private async _resolveApprovalRequestId(msg: IncomingMessage, rawRequestId: string | undefined): Promise<string | undefined> {
+    if (!this._approvalManager) return undefined;
+    if (rawRequestId && rawRequestId !== 'last') return rawRequestId;
+
+    const pluginName = msg.plugin;
+    const bindingSession = !msg.isTopLevel
+      ? this.registry.list().find((session) => session.imBindings.some((binding) =>
+          binding.plugin === pluginName
+          && (binding.bindingKind === 'channel' ? binding.channelId === (msg.channelId ?? '') : binding.threadId === msg.threadId),
+        ))
+      : undefined;
+
+    if (!bindingSession) return undefined;
+    return this._approvalManager.getPendingApprovalForSession(bindingSession.sessionId)?.requestId;
+  }
+
+  private async _finalizeApprovalDecision(
     msg: IncomingMessage,
     channelId: string,
+    requestId: string,
     decision: 'approved' | 'denied' | 'cancelled',
+    scope: 'once' | 'session',
   ): Promise<void> {
     const imPlugin = this._getIMPlugin(msg.plugin);
     if (!this._approvalManager) return;
-
-    const parts = msg.text.trim().split(/\s+/);
-    const requestId = parts[1];
-    const scope = parts[2] === 'session' ? 'session' : 'once';
-    if (!requestId) {
-      if (imPlugin) {
-        await imPlugin.sendMessage(this._buildReplyTarget(msg, channelId), {
-          kind: 'text',
-          text: `用法：/${decision === 'approved' ? 'approve' : decision === 'denied' ? 'deny' : 'cancel'} <requestId> [once|session]`,
-        });
-      }
-      return;
-    }
 
     const state = this._approvalManager.getApprovalState(requestId);
     if (!state) {
       if (imPlugin) {
         await imPlugin.sendMessage(this._buildReplyTarget(msg, channelId), {
           kind: 'text',
-          text: `未找到审批请求 ${requestId}。`,
+          text: `未找到待处理审批。${approvalCommandHelp()}`,
         });
       }
       return;
@@ -356,35 +391,59 @@ export class Daemon {
       if (imPlugin) {
         await imPlugin.sendMessage(this._buildReplyTarget(msg, channelId), {
           kind: 'text',
-          text: `无权限处理审批 ${requestId}。`,
+          text: `无权限处理审批。`,
         });
       }
       return;
     }
 
-    let result;
-    if (decision === 'cancelled') {
-      result = await this._approvalManager.cancel(requestId);
-      if (imPlugin) mockApprovalDecision(imPlugin, requestId, 'cancelled', scope);
-    } else {
-      result = await this._approvalManager.decideByApprover(requestId, msg.userId, { decision, scope });
-      if (imPlugin) mockApprovalDecision(imPlugin, requestId, decision, scope);
-    }
+    const result = decision === 'cancelled'
+      ? await this._approvalManager.cancel(requestId)
+      : await this._approvalManager.decideByApprover(requestId, msg.userId, { decision, scope });
 
     if (imPlugin) {
+      mockApprovalDecision(imPlugin, requestId, decision, scope);
+      const stateLabel = decision === 'approved'
+        ? (scope === 'session' ? '✅ 已允许本 session' : '✅ 已允许本次操作')
+        : decision === 'denied'
+          ? '❌ 已拒绝本次操作'
+          : '⏹️ 已取消本次审批';
       await imPlugin.sendMessage(this._buildReplyTarget(msg, channelId), {
         kind: 'text',
-        text: `审批 ${requestId} 处理结果：${result.status}`,
+        text: `${stateLabel}（${result.status}）`,
       });
     }
+  }
+
+
+  private async _handleApprovalDecision(
+    msg: IncomingMessage,
+    channelId: string,
+    decision: 'approved' | 'denied' | 'cancelled',
+  ): Promise<void> {
+    const imPlugin = this._getIMPlugin(msg.plugin);
+    if (!this._approvalManager) return;
+
+    const parts = msg.text.trim().split(/\s+/);
+    const requestId = await this._resolveApprovalRequestId(msg, parts[1]);
+    const scope = parts[2] === 'session' ? 'session' : 'once';
+    if (!requestId) {
+      if (imPlugin) {
+        await imPlugin.sendMessage(this._buildReplyTarget(msg, channelId), {
+          kind: 'text',
+          text: `用法：/${decision === 'approved' ? 'approve' : decision === 'denied' ? 'deny' : 'cancel'} last [once|session]`,
+        });
+      }
+      return;
+    }
+
+    await this._finalizeApprovalDecision(msg, channelId, requestId, decision, scope);
   }
 
   private _buildReplyTarget(msg: IncomingMessage, channelId: string): MessageTarget {
     return {
       plugin: msg.plugin,
       channelId: msg.channelId ?? channelId,
-      // For top-level messages (channel root posts), reply to the channel itself (empty threadId).
-      // For thread replies, reply into that thread.
       threadId: msg.isTopLevel ? '' : msg.threadId,
       userId: msg.userId,
     };

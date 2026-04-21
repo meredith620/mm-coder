@@ -85,9 +85,11 @@ export class StdioIMPlugin implements IMPlugin {
     this._write({ type: 'update', messageId, text: this._toText(content) });
   }
 
-  async requestApproval(target: MessageTarget, request: ApprovalRequest): Promise<void> {
+  async requestApproval(target: MessageTarget, request: ApprovalRequest): Promise<string | undefined> {
+    const messageId = `approval-${++this._liveCounter}`;
     this._write({
       type: 'approval',
+      messageId,
       target,
       requestId: request.requestId,
       toolName: request.toolName,
@@ -95,5 +97,6 @@ export class StdioIMPlugin implements IMPlugin {
       riskLevel: request.riskLevel,
       scopeOptions: request.scopeOptions,
     });
+    return messageId;
   }
 }

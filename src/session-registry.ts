@@ -131,13 +131,11 @@ export class SessionRegistry {
         return 'attached_terminal';
       case 'takeover_pending':
         return 'takeover_pending';
-      case 'recovering':
-        return 'recovering';
       case 'error':
         return 'error';
       case 'attach_pending':
         if (previousRuntimeState === 'waiting_approval') return 'waiting_approval';
-        if (previousRuntimeState === 'running') return 'running';
+        if (previousRuntimeState === 'running' || previousRuntimeState === 'recovering') return 'running';
         return 'ready';
       default:
         return 'cold';
@@ -286,6 +284,8 @@ export class SessionRegistry {
     s.imWorkerPid = workerPid;
     s.status = 'idle';
     s.runtimeState = 'ready';
+    delete s.needsRecovery;
+    delete s.recoveryReason;
     s.revision += 1;
     s.lastActivityAt = new Date();
     debugLog({ event: 'worker_ready', sessionName: s.name, pid: workerPid, revision: s.revision });
@@ -295,9 +295,7 @@ export class SessionRegistry {
     const s = this._getOrThrow(name);
     this._guardLifecycle(s);
     s.imWorkerPid = null;
-    if (s.status === 'recovering') {
-      s.runtimeState = 'recovering';
-    } else if (s.status === 'error') {
+    if (s.status === 'error') {
       s.runtimeState = 'error';
     } else {
       s.status = 'idle';
@@ -311,8 +309,9 @@ export class SessionRegistry {
   markRecovering(name: string): void {
     const s = this._getOrThrow(name);
     this._guardLifecycle(s);
-    s.status = 'recovering';
     s.runtimeState = 'recovering';
+    s.needsRecovery = true;
+    s.recoveryReason = 'worker_crash';
     s.revision += 1;
     s.lastActivityAt = new Date();
     debugLog({ event: 'worker_recovering', sessionName: s.name, revision: s.revision });
@@ -430,6 +429,16 @@ export class SessionRegistry {
       s.revision += 1;
       s.lastActivityAt = new Date();
       debugLog({ event: 'transition', sessionName: s.name, from: 'idle', to: s.status, trigger: 'attach_start', revision: s.revision });
+      return;
+    }
+
+    if (s.runtimeState === 'recovering' && (s.status === 'im_processing' || s.status === 'approval_pending')) {
+      const previousStatus = s.status;
+      s.status = 'attach_pending';
+      s.runtimeState = previousStatus === 'approval_pending' ? 'waiting_approval' : 'running';
+      s.revision += 1;
+      s.lastActivityAt = new Date();
+      debugLog({ event: 'transition', sessionName: s.name, from: previousStatus, to: s.status, trigger: 'attach_start', revision: s.revision });
       return;
     }
 

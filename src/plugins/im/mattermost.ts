@@ -22,6 +22,16 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null;
 }
 
+function normalizeReactionEmoji(value: unknown): string | undefined {
+  if (typeof value !== 'string' || value.trim() === '') return undefined;
+  const emoji = value.trim();
+  if (emoji === '+1') return '👍';
+  if (emoji === 'white_check_mark') return '✅';
+  if (emoji === '-1') return '👎';
+  if (emoji === 'stop_button') return '⏹️';
+  return emoji;
+}
+
 function requireNonEmptyString(value: unknown, fieldName: string, configPath: string): string {
   if (typeof value !== 'string' || value.trim() === '') {
     throw new Error(`Mattermost config field '${fieldName}' is required in ${configPath}`);
@@ -294,6 +304,22 @@ export class MattermostPlugin implements IMPlugin {
     }
   }
 
+  private _formatApprovalMessage(request: ApprovalRequest): string {
+    return [
+      `**Approval required** — \`${request.toolName}\``,
+      `风险：${request.riskLevel}　能力：${request.capability}`,
+      request.toolInputSummary,
+      '',
+      '请直接对本消息添加 reaction：',
+      '👍 Yes, once',
+      '✅ Yes, for this session',
+      '👎 No',
+      '⏹️ Cancel',
+      '',
+      'fallback：`/approve last once` ` /approve last session` ` /deny last` ` /cancel last`',
+    ].join('\n');
+  }
+
   private _headers(): Record<string, string> {
     return {
       'Authorization': `Bearer ${this._config.token}`,
@@ -428,6 +454,39 @@ export class MattermostPlugin implements IMPlugin {
       this._lastHeartbeatAckAt = Date.now();
     }
 
+    if (event.event === 'reaction_added' || event.event === 'reaction_removed') {
+      const reactionData = event.data as Record<string, unknown> | undefined;
+      if (!reactionData) return;
+      const channelId = reactionData.channel_id as string | undefined;
+      if (channelId !== this._config.channelId) return;
+      const postId = reactionData.post_id as string | undefined;
+      const userId = reactionData.user_id as string | undefined;
+      const emoji = normalizeReactionEmoji(reactionData.emoji_name);
+      if (!postId || !userId || !emoji) return;
+      if (userId === this._botUserId) return;
+
+      const incomingReaction = {
+        action: event.event === 'reaction_added' ? 'added' : 'removed',
+        emoji,
+        postId,
+      } as const;
+      const incoming: IncomingMessage = {
+        messageId: `${postId}:${userId}:${emoji}:${event.event}`,
+        plugin: 'mattermost',
+        channelId,
+        threadId: postId,
+        isTopLevel: false,
+        userId,
+        text: '',
+        createdAt: new Date().toISOString(),
+        dedupeKey: `${postId}:${userId}:${emoji}:${event.event}`,
+        reaction: incomingReaction,
+      };
+      this._debugLog({ event: 'ws_reaction', channelId, postId, userId, emoji, action: incomingReaction.action });
+      for (const h of this._handlers) h(incoming);
+      return;
+    }
+
     if (event.event !== 'posted') return;
 
     const data = event.data as Record<string, unknown> | undefined;
@@ -518,28 +577,24 @@ export class MattermostPlugin implements IMPlugin {
     });
   }
 
-  async requestApproval(target: MessageTarget, request: ApprovalRequest): Promise<void> {
-    const commandHelp = [
-      `/approve ${request.requestId} once`,
-      `/approve ${request.requestId} session`,
-      `/deny ${request.requestId} once`,
-      `/cancel ${request.requestId}`,
-    ].join('\n');
-
-    await this._apiRequest('/api/v4/posts', {
+  async requestApproval(target: MessageTarget, request: ApprovalRequest): Promise<string | undefined> {
+    const message = this._formatApprovalMessage(request);
+    const res = await this._apiRequest('/api/v4/posts', {
       method: 'POST',
       body: JSON.stringify({
         channel_id: target.channelId ?? this._config.channelId,
         root_id: target.threadId,
-        message: `**Approval required** — \`${request.toolName}\`\n${request.toolInputSummary}\n\n可用命令：\n${commandHelp}`,
+        message,
         props: {
           attachments: [{
             title: `Tool: ${request.toolName}`,
-            text: `${request.toolInputSummary}\n\n${commandHelp}`,
+            text: `风险：${request.riskLevel}　能力：${request.capability}\n${request.toolInputSummary}`,
             color: request.riskLevel === 'high' ? '#FF0000' : request.riskLevel === 'medium' ? '#FFA500' : '#00FF00',
           }],
         },
       }),
     });
+    const data = await res.json() as { id?: string };
+    return data.id;
   }
 }

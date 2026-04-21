@@ -20,12 +20,14 @@
 mm-coder 的状态分三层：
 
 1. **控制面状态 `status`**
-   - `idle | attach_pending | attached | im_processing | approval_pending | takeover_pending | recovering | error`
+   - `idle | attach_pending | attached | im_processing | approval_pending | takeover_pending | error`
    - 作用：表达控制权归属与流程阶段
+   - 约束：`recovering` 不应作为持久化后的长期控制面状态；它若存在，也只能是进程内短暂恢复语义，不能跨 daemon 重启保活
 
 2. **运行态 `runtimeState`**
    - `cold | ready | running | waiting_approval | attached_terminal | takeover_pending | recovering | error`
    - 作用：表达 Claude worker/terminal 的运行语义
+   - 约束：worker crash / restart 这类技术性恢复应优先落在 `runtimeState=recovering`，而不是把 `status` 长期改写为 `recovering`
 
 3. **执行补充信息（建议实现层维护）**
    - `activeMessageId?`
@@ -33,6 +35,8 @@ mm-coder 的状态分三层：
    - `lastTurnOutcome?`
    - `interruptReason?`
    - `lastResultAt?`
+   - `needsRecovery?`
+   - `recoveryReason?`
 
 原则：**`status` 决定控制权，`runtimeState` 决定运行语义，补充字段决定最近一次执行结果与来源。**
 
@@ -57,12 +61,13 @@ mm-coder 的状态分三层：
 3. `status = attached` => `runtimeState = attached_terminal`
 4. `status = takeover_pending` => `runtimeState = takeover_pending`
 5. `status = approval_pending` => `runtimeState = waiting_approval`
-6. `status = recovering` => `runtimeState = recovering`
-7. `status = error` => `runtimeState = error`
-8. `status = im_processing` => `runtimeState = running`
-9. `status = idle` => `runtimeState ∈ {cold, ready}`
-10. `status = attach_pending` => `runtimeState ∈ {running, waiting_approval, ready}`
-    - `ready` 仅表示“worker 已就绪，但 attach 优先，正在切换前停 worker”
+6. `status = error` => `runtimeState = error`
+7. `status = im_processing` => `runtimeState = running`
+8. `status = idle` => `runtimeState ∈ {cold, ready}`
+9. `status = attach_pending` => `runtimeState ∈ {running, waiting_approval, ready}`
+   - `ready` 仅表示“worker 已就绪，但 attach 优先，正在切换前停 worker”
+10. `runtimeState = recovering` 不能单独推出 `status = recovering`
+    - 长期真值应是“业务状态可恢复到稳定控制面，技术恢复放在 runtimeState / recovery metadata 表达”
 
 ### 3.3 PID 与运行态关系
 
@@ -97,6 +102,9 @@ mm-coder 的状态分三层：
 27. daemon 重启后，不允许把“旧的 ready worker”当作可继续控制的真实进程
 28. 持久化恢复后的 `runtimeState` 不能直接恢复成“可信 ready”，除非新 daemon 已重新验证并重建 worker
 29. `approval_pending` 经 daemon 重启后必须 fail-closed（转为 expired 或恢复路径）
+30. daemon 重启恢复时，不应把 `attached / im_processing / approval_pending / takeover_pending` 直接折叠为长期 `status=recovering`
+31. 上述中间态在持久化恢复后应优先回到可操作稳定态（通常是 `idle`），并通过 `needsRecovery/recoveryReason` 表达“上次是异常中断恢复”
+32. `im_processing` 或 `approval_pending` 中断恢复后，未完成消息不能静默丢失；必须明确 replay / confirm / discard 之一
 
 ---
 
@@ -120,6 +128,8 @@ mm-coder 的状态分三层：
 - `status = approval_pending` 且没有任何 pending approval request
 - `runtimeState = cold` 但 `imWorkerPid != null`
 - `runtimeState = ready` 但 worker 实际已死、且尚未重新验证
+- 把 daemon 重启后恢复出来的 session 长期停在 `status = recovering`
+- `im_processing/approval_pending` 中断恢复后，队列里仍有 pending/running 消息，但 dispatcher 永远不会再调度它们
 - 队列里两条消息同时为 `running`
 - attach waiter 在等 `attach_ready`，daemon 却只发 `session_resume`，或反之
 

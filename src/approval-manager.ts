@@ -42,6 +42,7 @@ export interface ApprovalState {
   operatorId?: string;
   capability?: Capability;
   cancelReason?: string;
+  interactionMessageId?: string;
   context: CreatedApproval['context'];
   // CAS lock: once decision is set away from 'pending', no further changes
   _decided: boolean;
@@ -245,6 +246,33 @@ export class ApprovalManager {
     } finally {
       releaseMutex(mutex);
     }
+  }
+
+  attachInteractionMessage(requestId: string, interactionMessageId: string): void {
+    const state = this._states.get(requestId);
+    if (!state) return;
+    state.interactionMessageId = interactionMessageId;
+  }
+
+  getApprovalStateByInteractionMessageId(interactionMessageId: string): ApprovalState | undefined {
+    for (const state of Array.from(this._states.values()).reverse()) {
+      if (state.interactionMessageId === interactionMessageId) {
+        return state;
+      }
+    }
+    return undefined;
+  }
+
+  getPendingApprovalForSession(sessionId: string): ApprovalState | undefined {
+    const pendingSet = this._sessionPending.get(sessionId);
+    if (!pendingSet) return undefined;
+    for (const requestId of Array.from(pendingSet).reverse()) {
+      const state = this._states.get(requestId);
+      if (state && !state._decided && state.decision === 'pending') {
+        return state;
+      }
+    }
+    return undefined;
   }
 
   getApprovalState(requestId: string): ApprovalState | undefined {

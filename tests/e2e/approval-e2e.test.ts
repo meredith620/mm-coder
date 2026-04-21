@@ -126,6 +126,7 @@ setTimeout(() => { console.log(buf.trim()); s.destroy(); }, 2000);
     expect(mockIM.approvalRequests.length).toBeGreaterThan(0);
     const req = mockIM.approvalRequests[0];
     expect(req.toolName).toBe('bash');
+    expect(mockIM.approvalInteractions[0]?.requestId).toBe(req.requestId);
 
     // Approve via ApprovalManager
     const states = approvalMgr.getAllApprovalStates();

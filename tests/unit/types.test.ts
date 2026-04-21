@@ -13,7 +13,7 @@ describe('ALL_SESSION_STATUSES', () => {
   test('包含所有合法状态', () => {
     const expected = [
       'idle', 'attach_pending', 'attached', 'im_processing',
-      'approval_pending', 'takeover_pending', 'recovering', 'error',
+      'approval_pending', 'takeover_pending', 'error',
     ];
     expect(ALL_SESSION_STATUSES).toEqual(expect.arrayContaining(expected));
     expect(ALL_SESSION_STATUSES).toHaveLength(expected.length);

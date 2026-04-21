@@ -124,7 +124,7 @@ export class ApprovalHandler {
         const target = resolvedContext?.target ?? this._opts.imTarget;
         const sessionName = resolvedContext?.sessionName ?? sessionId;
 
-        await this._opts.imPlugin.requestApproval(target, {
+        const interactionMessageId = await this._opts.imPlugin.requestApproval(target, {
           requestId: created.requestId,
           sessionName,
           messageId,
@@ -135,6 +135,9 @@ export class ApprovalHandler {
           scopeOptions: ['once', 'session'],
           timeoutSeconds: 60,
         });
+        if (interactionMessageId) {
+          this._opts.approvalManager.attachInteractionMessage(created.requestId, interactionMessageId);
+        }
 
         // Poll for decision (with timeout handled by ApprovalManager)
         const result = await this._waitForDecision(created.requestId);

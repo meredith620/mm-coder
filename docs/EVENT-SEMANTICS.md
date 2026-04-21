@@ -99,6 +99,23 @@ mm-coder 里有三类事件，不能混为一谈：
 - `cancelled`
   - 多用于 takeover / 新请求覆盖旧请求
 
+### 4.3 IM 审批交互语义
+
+- IM 审批主路径应采用**交互消息 + reaction**，而不是要求用户手输带完整 `requestId` 的 slash command。
+- 推荐映射：
+  - 👍 = `Yes, once`
+  - ✅ = `Yes, for this session`
+  - 👎 = `No`
+  - ⏹️ = `Cancel`
+- `Cancel` 的语义不是 deny，而是终止当前审批等待，让当前请求走 cancelled / expired 路径。
+- 文本命令仅作为 fallback，且应面向“当前 thread 最近一个 pending approval”，例如：
+  - `/approve last once`
+  - `/approve last session`
+  - `/deny last`
+  - `/cancel last`
+- 不应要求用户复制粘贴完整 `requestId`；那是内部关联键，不应成为主交互对象。
+- 审批消息在决策后应回写最终结果，形成稳定审计闭环，而不是留下可重复执行的静态命令模板。
+
 ---
 
 ## 5. attach / takeover 事件语义

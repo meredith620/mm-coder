@@ -25,6 +25,11 @@ interface ApprovalDecisionRecord {
   scope?: 'once' | 'session';
 }
 
+interface ApprovalInteractionRecord {
+  requestId: string;
+  messageId: string;
+}
+
 export class MockIMPlugin implements IMPlugin {
   private _handlers: Array<(msg: IncomingMessage) => void> = [];
   sent: SentRecord[] = [];
@@ -33,6 +38,7 @@ export class MockIMPlugin implements IMPlugin {
   approvalRequests: ApprovalRequest[] = [];
   approvalTargets: MessageTarget[] = [];
   approvalDecisions: ApprovalDecisionRecord[] = [];
+  approvalInteractions: ApprovalInteractionRecord[] = [];
   typingCalls: TypingRecord[] = [];
   createdConversations: CreatedConversationRecord[] = [];
   failCreateLiveMessage = false;
@@ -88,9 +94,12 @@ export class MockIMPlugin implements IMPlugin {
     this.liveMessages.set(messageId, text);
   }
 
-  async requestApproval(target: MessageTarget, request: ApprovalRequest): Promise<void> {
+  async requestApproval(target: MessageTarget, request: ApprovalRequest): Promise<string | undefined> {
     this.approvalTargets.push(target);
     this.approvalRequests.push(request);
+    const messageId = uuidv4();
+    this.approvalInteractions.push({ requestId: request.requestId, messageId });
+    return messageId;
   }
 
   recordApprovalDecision(requestId: string, decision: 'approved' | 'denied' | 'cancelled', scope?: 'once' | 'session'): void {

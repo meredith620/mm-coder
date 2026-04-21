@@ -48,8 +48,9 @@ export interface IMPlugin {
 
   /**
    * Send an approval request to the IM platform
+   * Returns the interactive message id when the platform exposes one.
    */
-  requestApproval(target: MessageTarget, request: ApprovalRequest): Promise<void>;
+  requestApproval(target: MessageTarget, request: ApprovalRequest): Promise<string | undefined>;
 
   /**
    * Send a typing indicator when the IM platform supports it

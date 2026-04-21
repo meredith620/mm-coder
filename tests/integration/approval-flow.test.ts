@@ -81,6 +81,8 @@ describe('审批链路集成', () => {
     expect(req.toolName).toBe('Edit');
     expect(req.capability).toBe('file_write');
     expect(req.riskLevel).toBe('medium');
+    expect(mockIM.approvalInteractions).toHaveLength(1);
+    expect(mockIM.approvalInteractions[0]?.requestId).toBe(req.requestId);
 
     const state = approvalMgr.getAllApprovalStates()[0];
     expect(state).toBeDefined();
@@ -179,6 +181,8 @@ describe('审批链路集成', () => {
     expect(mockIM.approvalRequests.at(-1)?.sessionName).toBe('sess-resolve-name');
     expect(mockIM.approvalTargets.at(-1)?.threadId).toBe('resolved-thread');
     expect(mockIM.approvalTargets.at(-1)?.channelId).toBe('resolved-channel');
+    expect(approvalMgr.getApprovalState(mockIM.approvalRequests.at(-1)!.requestId)?.interactionMessageId)
+      .toBe(mockIM.approvalInteractions.at(-1)?.messageId);
 
     workerSocket.destroy();
   });

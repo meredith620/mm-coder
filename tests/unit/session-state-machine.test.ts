@@ -38,7 +38,7 @@ describe('SessionStateMachine', () => {
     expect(sm.canTransition('approval_approved')).toBe(false);
   });
 
-  // 覆盖 SPEC §3.6 中所有合法迁移行（共 19 行，新增 approval_pending 的两条迁移）
+  // 覆盖 SPEC §3.6 中所有合法迁移行（去除长期 recovering 控制面状态）
   test.each([
     ['idle',            'attach_start',                        'attached'],
     ['im_processing',   'attach_start',                        'attach_pending'],
@@ -54,11 +54,7 @@ describe('SessionStateMachine', () => {
     ['approval_pending','approval_denied',                     'im_processing'],
     ['approval_pending','approval_timeout_or_restart',         'idle'],
     ['approval_pending','attach_start',                        'attach_pending'],
-    ['approval_pending','worker_crash',                        'recovering'],
     ['im_processing',   'message_completed',                   'idle'],
-    ['im_processing',   'worker_crash',                        'recovering'],
-    ['recovering',      'worker_restarted',                    'idle'],
-    ['recovering',      'restart_failed_over_limit',           'error'],
     ['error',           'manual_reset',                        'idle'],
   ] as [SessionStatus, StateEvent, SessionStatus][])(
     '%s + %s → %s',

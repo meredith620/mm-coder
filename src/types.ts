@@ -9,7 +9,6 @@ export type SessionStatus =
   | 'im_processing'
   | 'approval_pending'
   | 'takeover_pending'
-  | 'recovering'
   | 'error';
 
 export type LifecycleStatus = 'active' | 'stale' | 'archived';
@@ -25,7 +24,6 @@ export const ALL_SESSION_STATUSES: readonly SessionStatus[] = [
   'im_processing',
   'approval_pending',
   'takeover_pending',
-  'recovering',
   'error',
 ] as const;
 
@@ -67,6 +65,8 @@ export interface Session {
   runtimeState: RuntimeState;
   takeoverRequestedBy?: string;
   takeoverRequestedAt?: string;
+  needsRecovery?: boolean;
+  recoveryReason?: 'worker_crash' | 'daemon_restart_during_attach' | 'daemon_restart_during_im' | 'daemon_restart_during_approval' | 'daemon_restart_during_takeover';
 
   revision: number;
   spawnGeneration: number;
@@ -114,6 +114,11 @@ export interface IncomingMessage {
   text: string;
   createdAt: string;
   dedupeKey: string;
+  reaction?: {
+    action: 'added' | 'removed';
+    emoji: string;
+    postId: string;
+  };
 }
 
 export interface ApprovalContext {
@@ -138,6 +143,7 @@ export interface ApprovalRequest {
   capability: Capability;
   scopeOptions: Array<'once' | 'session'>;
   timeoutSeconds: number;
+  interactionMessageId?: string;
 }
 
 export interface ApprovalResult {

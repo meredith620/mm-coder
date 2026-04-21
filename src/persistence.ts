@@ -9,19 +9,18 @@ function deriveRuntimeStateFromStatus(status: SessionStatus): RuntimeState {
     case 'approval_pending':  return 'waiting_approval';
     case 'attached':          return 'attached_terminal';
     case 'takeover_pending':  return 'takeover_pending';
-    case 'recovering':        return 'recovering';
     case 'error':             return 'error';
     default:                  return 'cold';
   }
 }
 
 // States that cannot survive a daemon restart cleanly
-const RECOVER_STATES = new Set<SessionStatus>([
-  'attached',
-  'im_processing',
-  'approval_pending',
-  'takeover_pending',
-]);
+const RECOVER_STATE_REASON: Partial<Record<SessionStatus, NonNullable<Session['recoveryReason']>>> = {
+  attached: 'daemon_restart_during_attach',
+  im_processing: 'daemon_restart_during_im',
+  approval_pending: 'daemon_restart_during_approval',
+  takeover_pending: 'daemon_restart_during_takeover',
+};
 
 interface PersistedSession {
   name: string;
@@ -35,6 +34,8 @@ interface PersistedSession {
   spawnGeneration?: number;
   imBindings?: Session['imBindings'];
   messageQueue?: Session['messageQueue'];
+  needsRecovery?: boolean;
+  recoveryReason?: Session['recoveryReason'];
   createdAt?: string;
   lastActivityAt?: string;
 }
@@ -70,10 +71,22 @@ export class PersistenceStore {
 
     const now = new Date();
     for (const p of data.sessions ?? []) {
-      let status = (p.status ?? 'idle') as SessionStatus;
-      if (RECOVER_STATES.has(status)) {
-        status = 'recovering';
-      }
+      const persistedStatus = (p.status ?? 'idle') as SessionStatus | 'recovering';
+      const recoveredReason = persistedStatus === 'recovering'
+        ? (p.recoveryReason ?? 'daemon_restart_during_im')
+        : RECOVER_STATE_REASON[persistedStatus as SessionStatus];
+      const needsRecovery = persistedStatus === 'recovering' || recoveredReason !== undefined;
+      const status: SessionStatus = needsRecovery ? 'idle' : (persistedStatus as SessionStatus);
+      const runtimeState: RuntimeState = status === 'idle' ? 'cold' : deriveRuntimeStateFromStatus(status);
+      const messageQueue: Session['messageQueue'] = (p.messageQueue ?? []).map((message) => {
+        if (!needsRecovery) return message;
+        if (message.status === 'running' || message.status === 'waiting_approval') {
+          return message.status === 'waiting_approval'
+            ? { ...message, status: 'pending', approvalState: 'expired' }
+            : { ...message, status: 'pending' };
+        }
+        return message;
+      });
 
       const session: Session = {
         name: p.name,
@@ -83,7 +96,9 @@ export class PersistenceStore {
         status,
         lifecycleStatus: (p.lifecycleStatus as Session['lifecycleStatus']) ?? 'active',
         initState: (p.initState as Session['initState']) ?? 'uninitialized',
-        runtimeState: deriveRuntimeStateFromStatus(status),
+        runtimeState,
+        ...(needsRecovery ? { needsRecovery: true } : {}),
+        ...(recoveredReason ? { recoveryReason: recoveredReason } : {}),
         revision: p.revision ?? 0,
         spawnGeneration: p.spawnGeneration ?? 0,
         attachedPid: null,
@@ -93,7 +108,7 @@ export class PersistenceStore {
           ...binding,
           bindingKind: binding.bindingKind ?? 'thread',
         })),
-        messageQueue: p.messageQueue ?? [],
+        messageQueue,
         createdAt: p.createdAt ? new Date(p.createdAt) : now,
         lastActivityAt: p.lastActivityAt ? new Date(p.lastActivityAt) : now,
       };
@@ -116,6 +131,8 @@ export class PersistenceStore {
       spawnGeneration: s.spawnGeneration,
       imBindings: s.imBindings,
       messageQueue: s.messageQueue,
+      ...(s.needsRecovery !== undefined ? { needsRecovery: s.needsRecovery } : {}),
+      ...(s.recoveryReason !== undefined ? { recoveryReason: s.recoveryReason } : {}),
       createdAt: s.createdAt.toISOString(),
       lastActivityAt: s.lastActivityAt.toISOString(),
     }));

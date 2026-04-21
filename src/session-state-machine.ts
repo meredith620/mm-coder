@@ -39,22 +39,16 @@ export const TRANSITION_TABLE: Record<SessionStatus, Partial<Record<StateEvent, 
     attach_start:         'attach_pending',
     tool_permission_required: 'approval_pending',
     message_completed:    'idle',
-    worker_crash:         'recovering',
   },
   approval_pending: {
     approval_approved:    'im_processing',
     approval_denied:      'im_processing',
     approval_timeout_or_restart: 'idle',
     attach_start:         'attach_pending',
-    worker_crash:         'recovering',
   },
   takeover_pending: {
     terminal_sigterm_exited: 'idle',
     takeover_cancelled: 'attached',
-  },
-  recovering: {
-    worker_restarted:     'idle',
-    restart_failed_over_limit: 'error',
   },
   error: {
     manual_reset:         'idle',
