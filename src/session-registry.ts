@@ -163,6 +163,7 @@ export class SessionRegistry {
       imWorkerCrashCount: 0,
       imBindings: [],
       messageQueue: [],
+      streamState: {},
       createdAt: now,
       lastActivityAt: now,
     };
@@ -193,6 +194,7 @@ export class SessionRegistry {
       imWorkerCrashCount: 0,
       imBindings: [],
       messageQueue: [],
+      streamState: {},
       createdAt: now,
       lastActivityAt: now,
     };
@@ -217,7 +219,11 @@ export class SessionRegistry {
   /** Update sessionId (e.g. after first CLI run returns real conversation ID) */
   updateSessionId(name: string, newSessionId: string): void {
     const s = this._getOrThrow(name);
+    const sessionIdChanged = s.sessionId !== newSessionId;
     s.sessionId = newSessionId;
+    if (sessionIdChanged) {
+      s.streamState = {};
+    }
     if (s.initState === 'uninitialized') {
       s.initState = 'initialized';
     }

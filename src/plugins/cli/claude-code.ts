@@ -6,6 +6,7 @@ import { createInterface } from 'readline';
 import type { Readable } from 'stream';
 import type { Session, CLIEvent, StreamCursor } from '../../types.js';
 import type { CLIPlugin, CommandSpec } from '../types.js';
+import { generateBridgeMcpConfig, MM_CODER_PERMISSION_TOOL_NAME } from '../../mcp-bridge.js';
 
 export function getClaudeProjectPath(workdir: string): string {
   const normalizedWorkdir = path.resolve(workdir).replace(/[\\/]/g, '-');
@@ -21,6 +22,28 @@ export function hasClaudeSession(workdir: string, sessionId: string): boolean {
   return fs.existsSync(getClaudeSessionPath(workdir, sessionId));
 }
 
+export function readClaudePermissionMode(workdir: string, sessionId: string): 'default' | 'acceptEdits' | 'plan' | 'auto' | 'bypassPermissions' | 'dontAsk' | undefined {
+  const sessionPath = getClaudeSessionPath(workdir, sessionId);
+  if (!fs.existsSync(sessionPath)) return undefined;
+
+  const lines = fs.readFileSync(sessionPath, 'utf8').split('\n').filter(Boolean);
+  for (let i = lines.length - 1; i >= 0; i -= 1) {
+    const line = lines[i];
+    if (!line) continue;
+    try {
+      const parsed = JSON.parse(line) as { permissionMode?: unknown };
+      const mode = parsed.permissionMode;
+      if (mode === 'default' || mode === 'acceptEdits' || mode === 'plan' || mode === 'auto' || mode === 'bypassPermissions' || mode === 'dontAsk') {
+        return mode;
+      }
+    } catch {
+      continue;
+    }
+  }
+
+  return undefined;
+}
+
 export class ClaudeCodePlugin implements CLIPlugin {
   /**
    * 真实恢复依据不是 initState，而是 Claude 本地 session 文件是否存在。
@@ -34,22 +57,29 @@ export class ClaudeCodePlugin implements CLIPlugin {
   }
 
   buildAttachCommand(session: Session): CommandSpec {
+    const permissionMode = readClaudePermissionMode(session.workdir, session.sessionId);
     return {
       command: 'claude',
-      args: this._resumeArgs(session),
+      args: [
+        ...this._resumeArgs(session),
+        ...(permissionMode ? ['--permission-mode', permissionMode] : []),
+      ],
     };
   }
 
   buildIMWorkerCommand(session: Session, bridgeScriptPath: string): CommandSpec {
+    const permissionMode = readClaudePermissionMode(session.workdir, session.sessionId);
     return {
       command: 'claude',
       args: [
         '-p',
         ...this._resumeArgs(session),
+        ...(permissionMode ? ['--permission-mode', permissionMode] : []),
         '--input-format', 'stream-json',
         '--output-format', 'stream-json',
         '--verbose',
-        '--permission-prompt-tool', `node ${bridgeScriptPath}`,
+        '--mcp-config', JSON.stringify(generateBridgeMcpConfig(bridgeScriptPath)),
+        '--permission-prompt-tool', MM_CODER_PERMISSION_TOOL_NAME,
       ],
     };
   }

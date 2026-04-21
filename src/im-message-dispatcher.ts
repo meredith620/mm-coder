@@ -2,7 +2,7 @@ import * as readline from 'readline';
 import type { ChildProcess } from 'child_process';
 import type { SessionRegistry } from './session-registry.js';
 import type { IMPlugin } from './plugins/types.js';
-import type { MessageTarget, QueuedMessage, Session } from './types.js';
+import type { MessageTarget, QueuedMessage, Session, StreamCursor } from './types.js';
 import { StreamToIM } from './stream-to-im.js';
 import { IMWorkerManager } from './im-worker-manager.js';
 
@@ -20,6 +20,10 @@ interface ActiveTurn {
   resolve: () => void;
   reject: (error: Error) => void;
   lastEventAt: number;
+  userText: string;
+  previousCursor: StreamCursor | undefined;
+  cursorSatisfied: boolean;
+  lastStreamMessageId: string | undefined;
 }
 
 export interface IMMessageDispatcherOptions {
@@ -135,13 +139,25 @@ export class IMMessageDispatcher {
   }
 
   private _normalizeEvent(event: Record<string, unknown>): Record<string, unknown> {
-    if ('payload' in event) {
-      return event;
+    const eventWithMessageId = event.messageId === undefined && typeof (event.message as { id?: unknown } | undefined)?.id === 'string'
+      ? { ...event, messageId: (event.message as { id: string }).id }
+      : event;
+    if ('payload' in eventWithMessageId) {
+      return eventWithMessageId;
     }
-    if ('message' in event) {
-      return { ...event, payload: event.message };
+    if ('message' in eventWithMessageId) {
+      return { ...eventWithMessageId, payload: eventWithMessageId.message };
     }
-    return event;
+    return eventWithMessageId;
+  }
+
+  private _extractTextBlocks(event: Record<string, unknown>): string {
+    const payload = event.payload as { content?: Array<{ type?: string; text?: string }>; message?: { content?: Array<{ type?: string; text?: string }> } } | undefined;
+    const content = payload?.content ?? payload?.message?.content ?? [];
+    return content
+      .filter((block) => block.type === 'text' && typeof block.text === 'string')
+      .map((block) => block.text ?? '')
+      .join('');
   }
 
   private _notifyActiveTurn(sessionName: string, line: string): Promise<void> {
@@ -154,8 +170,37 @@ export class IMMessageDispatcher {
       const rawEvent = JSON.parse(line) as Record<string, unknown>;
       const event = this._normalizeEvent(rawEvent);
       activeTurn.lastEventAt = Date.now();
+
+      if (!activeTurn.cursorSatisfied && activeTurn.previousCursor) {
+        if (event.messageId === activeTurn.previousCursor.lastMessageId) {
+          if (event.type === 'result') {
+            activeTurn.cursorSatisfied = true;
+          }
+          return Promise.resolve();
+        }
+        if (event.type === 'user' && this._extractTextBlocks(event) === activeTurn.userText) {
+          activeTurn.cursorSatisfied = true;
+          activeTurn.lastStreamMessageId = typeof event.messageId === 'string' ? event.messageId : activeTurn.lastStreamMessageId;
+          return Promise.resolve();
+        }
+      }
+
+      if (typeof event.messageId === 'string') {
+        activeTurn.lastStreamMessageId = event.messageId;
+      }
+
       return activeTurn.streamToIM.onEvent(event as Parameters<typeof activeTurn.streamToIM.onEvent>[0]).then(() => {
         if (event.type === 'result') {
+          const completedSession = this._opts.registry.get(sessionName);
+          if (completedSession && activeTurn.lastStreamMessageId) {
+            completedSession.streamState = {
+              ...(completedSession.streamState ?? {}),
+              cursor: {
+                sessionId: completedSession.sessionId,
+                lastMessageId: activeTurn.lastStreamMessageId,
+              },
+            };
+          }
           this._activeTurns.delete(sessionName);
           activeTurn.resolve();
         }
@@ -252,6 +297,9 @@ export class IMMessageDispatcher {
       content: message.content,
     });
 
+    let stopTyping = () => {};
+    const previousCursor = session.streamState?.cursor;
+
     let turnResolved = false;
     const turnDone = new Promise<void>((resolve, reject) => {
       this._activeTurns.set(sessionName, {
@@ -266,14 +314,19 @@ export class IMMessageDispatcher {
           reject(error);
         },
         lastEventAt: Date.now(),
+        userText: message.content,
+        previousCursor,
+        cursorSatisfied: previousCursor === undefined,
+        lastStreamMessageId: undefined,
       });
     });
-
-    let stopTyping = () => {};
 
     try {
       this._markMessageStatus(sessionName, message.messageId, 'running');
       await this._opts.workerManager.ensureRunning(sessionName);
+      if (previousCursor) {
+        debugLog({ event: 'stream_cursor_active', sessionName, lastMessageId: previousCursor.lastMessageId, sessionId: previousCursor.sessionId });
+      }
       this._opts.registry.markImProcessing(sessionName);
 
       const proc = this._opts.workerManager.getProcess(sessionName);

@@ -77,6 +77,7 @@ export interface Session {
   imWorkerCrashCount: number;
   imBindings: IMBinding[];
   messageQueue: QueuedMessage[];
+  streamState?: SessionStreamState;
   createdAt: Date;
   lastActivityAt: Date;
 }
@@ -84,6 +85,10 @@ export interface Session {
 export interface StreamCursor {
   lastMessageId: string;
   sessionId: string;
+}
+
+export interface SessionStreamState {
+  cursor?: StreamCursor;
 }
 
 export type MessageContent =

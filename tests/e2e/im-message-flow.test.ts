@@ -7,12 +7,15 @@ import { IMMessageDispatcher } from '../../src/im-message-dispatcher.js';
 import { IMWorkerManager } from '../../src/im-worker-manager.js';
 import { MockIMPlugin } from '../helpers/mock-im-plugin.js';
 import { MockCLIPlugin } from '../helpers/mock-cli-plugin.js';
+import { ApprovalHandler } from '../../src/approval-handler.js';
+import { ApprovalManager } from '../../src/approval-manager.js';
 
 describe('IM 消息处理 E2E', () => {
   let tmpDir: string;
   let registry: SessionRegistry;
   let mockIM: MockIMPlugin;
   let dispatcher: IMMessageDispatcher;
+  let approvalHandler: ApprovalHandler | undefined;
 
   beforeEach(() => {
     tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'mm-e2e-test-'));
@@ -20,8 +23,9 @@ describe('IM 消息处理 E2E', () => {
     mockIM = new MockIMPlugin();
   });
 
-  afterEach(() => {
+  afterEach(async () => {
     dispatcher?.stop();
+    await approvalHandler?.close();
     fs.rmSync(tmpDir, { recursive: true, force: true });
   });
 
@@ -66,48 +70,73 @@ describe('IM 消息处理 E2E', () => {
     expect(messages.some(m => m.includes('Hello from mock claude'))).toBe(true);
   }, 10000);
 
-  test('消息处理中崩溃 → 重启 → 状态恢复', async () => {
-    // First invocation crashes, second succeeds
-    const crashScript = path.join(tmpDir, 'crash-then-ok.sh');
-    const countFile = path.join(tmpDir, 'count.txt');
-    fs.writeFileSync(countFile, '0');
-    fs.writeFileSync(crashScript, [
-      '#!/bin/sh',
-      'while IFS= read -r line; do',
-      `  COUNT=$(cat ${countFile})`,
-      `  echo $((COUNT + 1)) > ${countFile}`,
-      '  if [ "$COUNT" = "0" ]; then exit 1; fi',
-      '  echo \'{"type":"assistant","payload":{"message":{"content":[{"type":"text","text":"recovered"}]}}}\'',
-      '  echo \'{"type":"result","payload":{"subtype":"success","result":"done"}}\'',
-      'done',
+  test('worker 重连后历史 user/assistant/result 不会被重新桥接到 IM', async () => {
+    const workerScript = path.join(tmpDir, 'mock-claude-replay-safe.sh');
+    const stateFile = path.join(tmpDir, 'replay-state.json');
+    fs.writeFileSync(stateFile, JSON.stringify({ firstTurnDone: false }));
+    fs.writeFileSync(workerScript, [
+      '#!/usr/bin/env node',
+      "const fs = require('fs');",
+      "const readline = require('readline');",
+      `const stateFile = ${JSON.stringify(stateFile)};`,
+      'const rl = readline.createInterface({ input: process.stdin, crlfDelay: Infinity });',
+      'rl.on("line", () => {',
+      '  const state = JSON.parse(fs.readFileSync(stateFile, "utf8"));',
+      '  if (!state.firstTurnDone) {',
+      '    process.stdout.write(JSON.stringify({ type: "user", message: { id: "user-turn-1", content: [{ type: "text", text: "first question" }] } }) + "\\n");',
+      '    process.stdout.write(JSON.stringify({ type: "assistant", message: { id: "assistant-turn-1", content: [{ type: "text", text: "first answer" }] } }) + "\\n");',
+      '    process.stdout.write(JSON.stringify({ type: "result", message: { id: "assistant-turn-1" }, subtype: "success", result: "done-1" }) + "\\n");',
+      '    fs.writeFileSync(stateFile, JSON.stringify({ firstTurnDone: true }));',
+      '    return;',
+      '  }',
+      '  process.stdout.write(JSON.stringify({ type: "user", message: { id: "user-turn-1", content: [{ type: "text", text: "first question" }] } }) + "\\n");',
+      '  process.stdout.write(JSON.stringify({ type: "assistant", message: { id: "assistant-turn-1", content: [{ type: "text", text: "first answer" }] } }) + "\\n");',
+      '  process.stdout.write(JSON.stringify({ type: "result", message: { id: "assistant-turn-1" }, subtype: "success", result: "done-1" }) + "\\n");',
+      '  process.stdout.write(JSON.stringify({ type: "user", message: { id: "user-turn-2", content: [{ type: "text", text: "second question" }] } }) + "\\n");',
+      '  process.stdout.write(JSON.stringify({ type: "assistant", message: { id: "assistant-turn-2", content: [{ type: "text", text: "second fresh answer" }] } }) + "\\n");',
+      '  process.stdout.write(JSON.stringify({ type: "result", message: { id: "assistant-turn-2" }, subtype: "success", result: "done-2" }) + "\\n");',
+      '});',
     ].join('\n'), { mode: 0o755 });
 
-    registry.create('crash-session', { workdir: tmpDir, cliPlugin: 'mock' });
-
+    registry.create('replay-safe-session', { workdir: tmpDir, cliPlugin: 'mock' });
+    const workerManager = new IMWorkerManager(new MockCLIPlugin(workerScript), registry);
     dispatcher = new IMMessageDispatcher({
       registry,
       imPlugin: mockIM,
-      imTarget: { plugin: 'mock', threadId: 'thread-2' },
-      workerManager: new IMWorkerManager(new MockCLIPlugin(crashScript), registry),
-      maxRetries: 2,
+      imTarget: { plugin: 'mock', threadId: 'thread-replay-safe' },
+      workerManager,
+      pollIntervalMs: 50,
     });
-
     dispatcher.start();
 
-    registry.enqueueIMMessage('crash-session', {
+    registry.enqueueIMMessage('replay-safe-session', {
       plugin: 'mock',
-      threadId: 'thread-2',
-      messageId: 'msg-crash',
+      threadId: 'thread-replay-safe',
+      messageId: 'msg-first',
       userId: 'user-1',
-      text: 'test crash recovery',
-      dedupeKey: 'dedup-crash',
+      text: 'first question',
+      dedupeKey: 'dedup-first',
     });
 
-    // Wait for crash + restart
+    await new Promise(resolve => setTimeout(resolve, 1200));
+    const firstMessages = [...mockIM.liveMessages.values()];
+    expect(firstMessages.some(m => m.includes('first answer'))).toBe(true);
+
+    await workerManager.terminate('replay-safe-session');
+
+    registry.enqueueIMMessage('replay-safe-session', {
+      plugin: 'mock',
+      threadId: 'thread-replay-safe',
+      messageId: 'msg-second',
+      userId: 'user-1',
+      text: 'second question',
+      dedupeKey: 'dedup-second',
+    });
+
     await new Promise(resolve => setTimeout(resolve, 1500));
 
-    const session = registry.get('crash-session');
-    expect(session?.imWorkerCrashCount).toBeGreaterThan(0);
-    expect(['recovering', 'ready', 'cold']).toContain(session?.runtimeState ?? 'cold');
+    const messages = [...mockIM.liveMessages.values()];
+    expect(messages.some(m => m.includes('second fresh answer'))).toBe(true);
+    expect(registry.get('replay-safe-session')?.streamState?.cursor?.lastMessageId).toBe('assistant-turn-2');
   }, 15000);
 });
