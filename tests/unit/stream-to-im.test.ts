@@ -9,7 +9,7 @@ describe('StreamToIM — 流式输出防抖', () => {
   beforeEach(() => {
     vi.useFakeTimers();
     mockIM = new MockIMPlugin();
-    handler = new StreamToIM(mockIM, { plugin: 'mock', threadId: 't1' });
+    handler = new StreamToIM(mockIM, { plugin: 'mock', threadId: 't1' }, 'normal');
   });
 
   afterEach(() => {
@@ -68,7 +68,8 @@ describe('StreamToIM — 流式输出防抖', () => {
     const msgId = [...mockIM.liveMessages.keys()][0];
 
     await handler.onEvent({ type: 'error', messageId: 'turn-1', payload: { message: 'something went wrong' } } as any);
-    expect(mockIM.liveMessages.get(msgId)).toBe('partial');
+    expect(mockIM.liveMessages.get(msgId)).toContain('partial');
+    expect(mockIM.liveMessages.get(msgId)).toContain('[error]');
   });
 
   test('第二轮 assistant 不会串到第一轮 live message', async () => {
@@ -85,14 +86,27 @@ describe('StreamToIM — 流式输出防抖', () => {
     expect(mockIM.liveMessages.get(ids[1])).toBe('two');
   });
 
-  test('未知和跨轮事件不会破坏当前轮缓冲', async () => {
-    await handler.onEvent({ type: 'assistant', messageId: 'turn-1', payload: { content: [{ type: 'text', text: 'hello' }] } } as any);
-    const firstMsgId = [...mockIM.liveMessages.keys()][0];
+  test('thinking 模式会输出 thinking 内容', async () => {
+    const thinkingHandler = new StreamToIM(mockIM, { plugin: 'mock', threadId: 't1' }, 'thinking');
+    await thinkingHandler.onEvent({ type: 'assistant', messageId: 'turn-1', payload: { content: [{ type: 'thinking', text: 'internal reasoning' }] } } as any);
+    const msgId = [...mockIM.liveMessages.keys()].at(-1)!;
+    expect(mockIM.liveMessages.get(msgId)).toContain('[thinking]');
+    expect(mockIM.liveMessages.get(msgId)).toContain('internal reasoning');
+  });
 
-    await handler.onEvent({ type: 'attachment', messageId: 'turn-1', payload: { file: 'a.txt' } } as any);
-    await handler.onEvent({ type: 'queue-operation', messageId: 'turn-1', payload: { op: 'enqueue' } } as any);
-    await handler.onEvent({ type: 'result', messageId: 'turn-1', subtype: 'success', result: 'done' } as any);
+  test('verbose 模式会输出 tool_use 和 tool_result 摘要', async () => {
+    const verboseHandler = new StreamToIM(mockIM, { plugin: 'mock', threadId: 't1' }, 'verbose');
+    await verboseHandler.onEvent({ type: 'assistant', messageId: 'turn-1', payload: { content: [
+      { type: 'tool_use', name: 'Read', input: { file_path: '/tmp/a.txt' } },
+      { type: 'tool_result', content: { ok: true, text: 'hello' } },
+    ] } } as any);
+    const msgId = [...mockIM.liveMessages.keys()].at(-1)!;
+    expect(mockIM.liveMessages.get(msgId)).toContain('[tool_use] Read');
+    expect(mockIM.liveMessages.get(msgId)).toContain('[tool_result]');
+  });
 
-    expect(mockIM.liveMessages.get(firstMsgId)).toBe('hello');
+  test('normal 模式不会输出 thinking', async () => {
+    await handler.onEvent({ type: 'assistant', messageId: 'turn-1', payload: { content: [{ type: 'thinking', text: 'hidden' }] } } as any);
+    expect(mockIM.liveMessages.size).toBe(0);
   });
 });

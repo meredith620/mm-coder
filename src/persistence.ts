@@ -34,6 +34,7 @@ interface PersistedSession {
   spawnGeneration?: number;
   imBindings?: Session['imBindings'];
   messageQueue?: Session['messageQueue'];
+  streamVisibility?: Session['streamVisibility'];
   needsRecovery?: boolean;
   recoveryReason?: Session['recoveryReason'];
   createdAt?: string;
@@ -104,6 +105,7 @@ export class PersistenceStore {
         attachedPid: null,
         imWorkerPid: null,
         imWorkerCrashCount: 0,
+        streamVisibility: p.streamVisibility ?? 'normal',
         imBindings: (p.imBindings ?? []).map((binding) => ({
           ...binding,
           bindingKind: binding.bindingKind ?? 'thread',
@@ -131,6 +133,7 @@ export class PersistenceStore {
       spawnGeneration: s.spawnGeneration,
       imBindings: s.imBindings,
       messageQueue: s.messageQueue,
+      streamVisibility: s.streamVisibility,
       ...(s.needsRecovery !== undefined ? { needsRecovery: s.needsRecovery } : {}),
       ...(s.recoveryReason !== undefined ? { recoveryReason: s.recoveryReason } : {}),
       createdAt: s.createdAt.toISOString(),

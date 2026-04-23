@@ -92,15 +92,13 @@ export function loadMattermostConfig(configPath = getDefaultMattermostConfigPath
     throw new Error(`Invalid Mattermost config format in ${configPath}`);
   }
 
-  // Support three config formats:
-  // 1. { "im": { "mattermost": { url, token, channelId } } }  (new multi-IM format)
-  // 2. { "mattermost": { url, token, channelId } }            (grouped format)
-  // 3. { url, token, channelId }                               (flat format)
-  const raw = isRecord(parsed['im']) && isRecord((parsed['im'] as Record<string, unknown>)['mattermost'])
-    ? (parsed['im'] as Record<string, unknown>)['mattermost'] as Record<string, unknown>
-    : isRecord(parsed['mattermost'])
-      ? parsed['mattermost']
-      : parsed;
+  const im = parsed['im'];
+  const raw = isRecord(im) && isRecord((im as Record<string, unknown>)['mattermost'])
+    ? (im as Record<string, unknown>)['mattermost'] as Record<string, unknown>
+    : undefined;
+  if (!raw) {
+    throw new Error(`Mattermost config must use {"im":{"mattermost":{...}}} format in ${configPath}`);
+  }
 
   const url = requireNonEmptyString(raw['url'], 'url', configPath);
   const token = requireNonEmptyString(raw['token'], 'token', configPath);
@@ -148,13 +146,14 @@ export function getMattermostCommandHelpText(): string {
     '**mx-coder 可用命令**：',
     '',
     '`/help` — 显示本帮助',
-    '`/list` — 列出所有 mx-coder session 及绑定 thread',
-    '`/status` — 显示当前 session 状态（在 thread 中）或全局统计（在主频道）',
-    '`/open <sessionName>` — 为未绑定 session 创建独立 thread；已有绑定则跳转到对应 thread',
+    '`/list` — 列出所有 mx-coder session 及绑定空间',
+    '`/status` — 显示当前 session 状态（在会话空间中）或全局统计（在主频道）',
+    '`/open <sessionName>` — 为未绑定 session 创建独立会话空间；已有绑定则跳转到对应空间',
+    '`/stream` — 查看当前会话输出模式；`/stream normal|thinking|verbose` 可切换',
     '`/takeover <sessionName>` — 请求接管当前被终端占用的会话',
     '`/takeover-force <sessionName>` — 立即强制接管当前被终端占用的会话',
     '',
-    '在 thread 中发送普通文本消息将交给 Claude 处理。若会话正被终端占用，消息会被拒绝并提示使用 takeover。',
+    '在 thread 或 session channel 中发送普通文本消息将交给 Claude 处理。若会话正被终端占用，消息会被拒绝并提示使用 takeover。',
     '`/remove`、`/attach`、`/create` 等 session 管理命令请在 CLI 中使用。',
   ].join('\n');
 }

@@ -78,7 +78,8 @@ source ~/.zshrc
 
 说明：
 - 当前 T1/T2 已支持静态子命令补全，以及通过 `completion sessions` 获取动态 session 名
-- shell 脚本本身已包含 `completion` 子命令的参数补全骨架
+- `eval "$(mx-coder completion bash)"` / `eval "$(mx-coder completion zsh)"` 用于安装补全脚本
+- `completion sessions` 输出的是 session 名列表，供补全脚本内部调用，不应直接用于 `eval`
 
 ## 配置
 
@@ -100,34 +101,13 @@ source ~/.zshrc
 }
 ```
 
-仍兼容旧格式：
-
-```json
-{
-  "mattermost": {
-    "url": "https://mattermost.example.com",
-    "token": "your-bot-token",
-    "channelId": "channel-id"
-  }
-}
-```
-
-以及最早的平铺格式：
-
-```json
-{
-  "url": "https://mattermost.example.com",
-  "token": "your-bot-token",
-  "channelId": "channel-id"
-}
-```
-
 | 字段 | 说明 |
 |------|------|
 | `url` | Mattermost 服务器地址 |
 | `token` | Bot 的 Personal Access Token |
 | `channelId` | 监听消息的频道 ID |
-| `spaceStrategy` | 新 session 的 Mattermost 会话空间策略：`thread`（默认）或 `channel`；`channel` 通过主 channel 作为统一索引入口并默认创建 private channel；remove/archive 默认优先 archive/解绑而不是硬删除；仅影响未来新建的 session |
+| `spaceStrategy` | 新 session 的 Mattermost 会话空间策略：`thread`（默认）或 `channel`；`channel` 通过主 channel 作为统一索引入口并默认创建 private channel；仅影响未来新建的 session |
+| `teamId` | 当 `spaceStrategy=channel` 时必填，用于创建 private channel |
 | `reconnectIntervalMs` | WebSocket 重连间隔（可选，默认 5000ms） |
 
 ## 插件开发

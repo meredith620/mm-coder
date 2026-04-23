@@ -54,6 +54,8 @@ export interface QueuedMessage {
   approvalScope?: 'once' | 'session';
 }
 
+export type StreamVisibility = 'normal' | 'thinking' | 'verbose';
+
 export interface Session {
   name: string;
   sessionId: string;
@@ -77,6 +79,7 @@ export interface Session {
   attachedPid: number | null;
   imWorkerPid: number | null;
   imWorkerCrashCount: number;
+  streamVisibility: StreamVisibility;
   imBindings: IMBinding[];
   messageQueue: QueuedMessage[];
   streamState?: SessionStreamState;

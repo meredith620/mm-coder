@@ -216,6 +216,7 @@ export class SessionRegistry {
       attachedPid: null,
       imWorkerPid: null,
       imWorkerCrashCount: 0,
+      streamVisibility: 'normal',
       imBindings: [],
       messageQueue: [],
       streamState: {},
@@ -247,6 +248,7 @@ export class SessionRegistry {
       attachedPid: null,
       imWorkerPid: null,
       imWorkerCrashCount: 0,
+      streamVisibility: 'normal',
       imBindings: [],
       messageQueue: [],
       streamState: {},
@@ -443,6 +445,14 @@ export class SessionRegistry {
     s.messageQueue.push(msg);
     debugLog({ event: 'enqueue_message', sessionName: name, messageId: msg.messageId, threadId: msg.threadId, channelId: msg.channelId, dedupeKey });
     return { alreadyExists: false };
+  }
+
+  updateStreamVisibility(name: string, visibility: Session['streamVisibility']): void {
+    const s = this._getOrThrow(name);
+    if (s.streamVisibility === visibility) return;
+    s.streamVisibility = visibility;
+    s.revision += 1;
+    s.lastActivityAt = new Date();
   }
 
   markDetached(name: string, _exitReason?: 'normal' | 'error'): void {

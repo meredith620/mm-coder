@@ -59,7 +59,7 @@ describe('Mattermost config loader', () => {
     expect(text).toContain('/help');
   });
 
-  test('支持顶层配置结构', () => {
+  test('旧版顶层配置结构报错', () => {
     const configPath = path.join(tmpDir, 'config.json');
     fs.writeFileSync(configPath, JSON.stringify({
       url: BASE_URL,
@@ -68,14 +68,10 @@ describe('Mattermost config loader', () => {
       reconnectIntervalMs: 2000,
     }));
 
-    const cfg = loadMattermostConfig(configPath);
-    expect(cfg.url).toBe(BASE_URL);
-    expect(cfg.token).toBe(TOKEN);
-    expect(cfg.channelId).toBe(CHANNEL_ID);
-    expect(cfg.reconnectIntervalMs).toBe(2000);
+    expect(() => loadMattermostConfig(configPath)).toThrow(/im.*mattermost/i);
   });
 
-  test('支持 mattermost 分组配置结构', () => {
+  test('旧版 mattermost 分组配置结构报错', () => {
     const configPath = path.join(tmpDir, 'config.json');
     fs.writeFileSync(configPath, JSON.stringify({
       mattermost: {
@@ -85,10 +81,7 @@ describe('Mattermost config loader', () => {
       },
     }));
 
-    const cfg = loadMattermostConfig(configPath);
-    expect(cfg.url).toBe(BASE_URL);
-    expect(cfg.token).toBe(TOKEN);
-    expect(cfg.channelId).toBe(CHANNEL_ID);
+    expect(() => loadMattermostConfig(configPath)).toThrow(/im.*mattermost/i);
   });
 
   test('支持 im.mattermost 多 IM 配置结构', () => {
@@ -113,19 +106,28 @@ describe('Mattermost config loader', () => {
 
   test('缺失必填字段时报错', () => {
     const configPath = path.join(tmpDir, 'config.json');
-    fs.writeFileSync(configPath, JSON.stringify({ url: BASE_URL, token: TOKEN }));
+    fs.writeFileSync(configPath, JSON.stringify({
+      im: {
+        mattermost: {
+          url: BASE_URL,
+          token: TOKEN,
+        },
+      },
+    }));
 
     expect(() => loadMattermostConfig(configPath)).toThrow(/channelId/);
   });
 
-  test('支持 mattermost spaceStrategy=thread 配置', () => {
+  test('支持 im.mattermost spaceStrategy=thread 配置', () => {
     const configPath = path.join(tmpDir, 'config.json');
     fs.writeFileSync(configPath, JSON.stringify({
-      mattermost: {
-        url: BASE_URL,
-        token: TOKEN,
-        channelId: CHANNEL_ID,
-        spaceStrategy: 'thread',
+      im: {
+        mattermost: {
+          url: BASE_URL,
+          token: TOKEN,
+          channelId: CHANNEL_ID,
+          spaceStrategy: 'thread',
+        },
       },
     }));
 
@@ -136,11 +138,13 @@ describe('Mattermost config loader', () => {
   test('spaceStrategy=channel 时要求 teamId', () => {
     const configPath = path.join(tmpDir, 'config.json');
     fs.writeFileSync(configPath, JSON.stringify({
-      mattermost: {
-        url: BASE_URL,
-        token: TOKEN,
-        channelId: CHANNEL_ID,
-        spaceStrategy: 'channel',
+      im: {
+        mattermost: {
+          url: BASE_URL,
+          token: TOKEN,
+          channelId: CHANNEL_ID,
+          spaceStrategy: 'channel',
+        },
       },
     }));
 
@@ -150,12 +154,14 @@ describe('Mattermost config loader', () => {
   test('spaceStrategy=channel 时支持 teamId', () => {
     const configPath = path.join(tmpDir, 'config.json');
     fs.writeFileSync(configPath, JSON.stringify({
-      mattermost: {
-        url: BASE_URL,
-        token: TOKEN,
-        channelId: CHANNEL_ID,
-        spaceStrategy: 'channel',
-        teamId: 'team-1',
+      im: {
+        mattermost: {
+          url: BASE_URL,
+          token: TOKEN,
+          channelId: CHANNEL_ID,
+          spaceStrategy: 'channel',
+          teamId: 'team-1',
+        },
       },
     }));
 
@@ -167,9 +173,13 @@ describe('Mattermost config loader', () => {
   test('createConnectedMattermostPlugin 会加载配置并执行 connect', async () => {
     const configPath = path.join(tmpDir, 'config.json');
     fs.writeFileSync(configPath, JSON.stringify({
-      url: BASE_URL,
-      token: TOKEN,
-      channelId: CHANNEL_ID,
+      im: {
+        mattermost: {
+          url: BASE_URL,
+          token: TOKEN,
+          channelId: CHANNEL_ID,
+        },
+      },
     }));
 
     const fetchMock = vi.fn()

@@ -129,6 +129,8 @@ describe('mx-coder CLI E2E', () => {
     expect(stdout).toContain('diagnose');
     expect(stdout).toContain('takeover-status');
     expect(stdout).toContain('takeover-cancel');
+    expect(stdout).toContain('mx-coder completion sessions');
+    expect(stdout).toContain('commands_with_sessions');
     expect(stdout).toContain('im');
     expect(stdout).toContain('tui');
   });
@@ -142,6 +144,8 @@ describe('mx-coder CLI E2E', () => {
     expect(stdout).toContain('diagnose');
     expect(stdout).toContain('takeover-status');
     expect(stdout).toContain('takeover-cancel');
+    expect(stdout).toContain('mx-coder completion sessions');
+    expect(stdout).toContain('session_commands');
     expect(stdout).toContain('im');
     expect(stdout).toContain('tui');
   });

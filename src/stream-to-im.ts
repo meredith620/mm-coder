@@ -1,7 +1,9 @@
 import type { IMPlugin } from './plugins/types.js';
-import type { MessageTarget } from './types.js';
+import type { MessageTarget, StreamVisibility } from './types.js';
 
 const DEBOUNCE_MS = 500;
+const THINKING_MAX_CHARS = 2000;
+const TOOL_RESULT_MAX_CHARS = 1200;
 
 interface AssistantPayload {
   content?: Array<{ type: string; text?: string }>;
@@ -30,17 +32,32 @@ interface ErrorEvent {
 
 type StreamEvent = AssistantEvent | ResultEvent | ErrorEvent | { type: string; messageId?: string; payload?: unknown };
 
+function truncate(text: string, maxChars: number): string {
+  return text.length > maxChars ? `${text.slice(0, maxChars)}…(已截断)` : text;
+}
+
+function stringifyUnknown(value: unknown): string {
+  if (typeof value === 'string') return value;
+  try {
+    return JSON.stringify(value, null, 2);
+  } catch {
+    return String(value);
+  }
+}
+
 export class StreamToIM {
   private _plugin: IMPlugin;
   private _target: MessageTarget;
+  private _visibility: StreamVisibility;
   private _messageId: string | null = null;
   private _turnMessageId: string | null = null;
   private _buffer = '';
   private _timer: ReturnType<typeof setTimeout> | null = null;
 
-  constructor(plugin: IMPlugin, target: MessageTarget) {
+  constructor(plugin: IMPlugin, target: MessageTarget, visibility: StreamVisibility) {
     this._plugin = plugin;
     this._target = target;
+    this._visibility = visibility;
   }
 
   async onEvent(event: StreamEvent): Promise<void> {
@@ -55,24 +72,28 @@ export class StreamToIM {
 
       const e = event as AssistantEvent;
       const content = e.payload?.content ?? e.payload?.message?.content ?? e.message?.content ?? [];
-      const text = content
-        .filter((c: { type: string; text?: string }) => c.type === 'text')
-        .map((c: { type: string; text?: string }) => c.text ?? '')
+      const rendered = content
+        .map((block) => this._renderAssistantBlock(block))
+        .filter((block): block is string => Boolean(block))
         .join('');
 
-      if (!text) return;
+      if (!rendered) return;
 
       if (!this._messageId) {
-        this._messageId = await this._plugin.createLiveMessage(this._target, { kind: 'text', text });
-        this._buffer = text;
+        this._messageId = await this._plugin.createLiveMessage(this._target, { kind: 'text', text: rendered });
+        this._buffer = rendered;
       } else {
-        this._buffer += text;
+        this._buffer += rendered;
         this._scheduleFlush();
       }
       return;
     }
 
     if (event.type === 'result') {
+      const result = (event as ResultEvent).result?.trim();
+      if (this._visibility === 'verbose' && result) {
+        this._buffer += `\n\n[result]\n${truncate(result, TOOL_RESULT_MAX_CHARS)}`;
+      }
       await this._flush();
       this._messageId = null;
       this._turnMessageId = null;
@@ -81,8 +102,37 @@ export class StreamToIM {
     }
 
     if (event.type === 'error') {
+      const message = (event as ErrorEvent).payload?.message?.trim();
+      if (message) {
+        this._buffer += `\n\n[error]\n${message}`;
+      }
       await this._flush();
     }
+  }
+
+  private _renderAssistantBlock(block: { type: string; text?: string; [key: string]: unknown }): string {
+    if (block.type === 'text') {
+      return block.text ?? '';
+    }
+    if (block.type === 'thinking') {
+      if (this._visibility === 'normal') return '';
+      const thinking = truncate(block.text ?? stringifyUnknown(block), THINKING_MAX_CHARS);
+      return thinking ? `\n\n[thinking]\n${thinking}` : '';
+    }
+    if (this._visibility !== 'verbose') {
+      return '';
+    }
+    if (block.type === 'tool_use') {
+      const toolName = typeof block['name'] === 'string' ? block['name'] : 'unknown';
+      const input = block['input'] ?? block['tool_input'];
+      const summary = input === undefined ? '' : `\n${truncate(stringifyUnknown(input), TOOL_RESULT_MAX_CHARS)}`;
+      return `\n\n[tool_use] ${toolName}${summary}`;
+    }
+    if (block.type === 'tool_result') {
+      const content = block['content'];
+      return `\n\n[tool_result]\n${truncate(stringifyUnknown(content ?? block), TOOL_RESULT_MAX_CHARS)}`;
+    }
+    return '';
   }
 
   private _scheduleFlush(): void {

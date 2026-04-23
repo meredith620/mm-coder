@@ -9,7 +9,7 @@ import { ApprovalHandler } from './approval-handler.js';
 import { getIMPluginFactory, getDefaultIMPluginName } from './plugins/im/registry.js';
 import { getCLIPlugin, getDefaultCLIPluginName } from './plugins/cli/registry.js';
 import type { IMPlugin } from './plugins/types.js';
-import type { IncomingMessage, MessageTarget, Session } from './types.js';
+import type { IncomingMessage, MessageTarget, Session, StreamVisibility } from './types.js';
 import type { AclAction, Actor } from './acl-manager.js';
 import type { ErrorCode } from './ipc/codec.js';
 import { randomUUID } from 'crypto';
@@ -30,6 +30,10 @@ function reactionToApprovalDecision(emoji: string): { decision: 'approved' | 'de
   if (emoji === '👎') return { decision: 'denied', scope: 'once' };
   if (emoji === '⏹️') return { decision: 'cancelled', scope: 'once' };
   return undefined;
+}
+
+function isStreamVisibility(value: string): value is StreamVisibility {
+  return value === 'normal' || value === 'thinking' || value === 'verbose';
 }
 
 
@@ -329,6 +333,11 @@ export class Daemon {
       return;
     }
 
+    if (trimmed === '/stream' || trimmed.startsWith('/stream ')) {
+      await this._handleStreamCommand(trimmed, channelId, msg);
+      return;
+    }
+
     if (trimmed === '/takeover' || trimmed.startsWith('/takeover ')) {
       const sessionName = trimmed === '/takeover' ? '' : trimmed.slice('/takeover '.length).trim();
       await this._handleTakeoverCommand(sessionName, channelId, msg, false);
@@ -439,10 +448,7 @@ export class Daemon {
 
     const pluginName = msg.plugin;
     const bindingSession = !msg.isTopLevel
-      ? this.registry.list().find((session) => session.imBindings.some((binding) =>
-          binding.plugin === pluginName
-          && (binding.bindingKind === 'channel' ? binding.channelId === (msg.channelId ?? '') : binding.threadId === msg.threadId),
-        ))
+      ? this._resolveBoundSession(msg)
       : undefined;
 
     if (!bindingSession) return undefined;
@@ -572,6 +578,50 @@ export class Daemon {
     return this._renderGlobalStatus(sessions);
   }
 
+  private _resolveBoundSession(msg: IncomingMessage): Session | undefined {
+    return this.registry.list().find((session) => session.imBindings.some((binding) =>
+      binding.plugin === msg.plugin
+      && (binding.bindingKind === 'channel' ? binding.channelId === (msg.channelId ?? '') : binding.threadId === msg.threadId),
+    ));
+  }
+
+  private async _handleStreamCommand(trimmed: string, channelId: string, msg: IncomingMessage): Promise<void> {
+    const imPlugin = this._getIMPlugin(msg.plugin);
+    if (!imPlugin) return;
+    const session = this._resolveBoundSession(msg);
+    if (!session) {
+      await imPlugin.sendMessage(this._buildReplyTarget(msg, channelId), {
+        kind: 'text',
+        text: '请在目标会话的 thread 或 session channel 中执行 `/stream`。',
+      });
+      return;
+    }
+
+    const arg = trimmed === '/stream' ? '' : trimmed.slice('/stream '.length).trim();
+    if (!arg) {
+      await imPlugin.sendMessage(this._buildReplyTarget(msg, channelId), {
+        kind: 'text',
+        text: `当前会话 ${session.name} 的输出模式为 \`${session.streamVisibility}\`。可用值：\`normal\`、\`thinking\`、\`verbose\`。`,
+      });
+      return;
+    }
+
+    if (!isStreamVisibility(arg)) {
+      await imPlugin.sendMessage(this._buildReplyTarget(msg, channelId), {
+        kind: 'text',
+        text: '用法：`/stream` 或 `/stream normal|thinking|verbose`。',
+      });
+      return;
+    }
+
+    this.registry.updateStreamVisibility(session.name, arg);
+    if (this._store) void this._store.flush();
+    await imPlugin.sendMessage(this._buildReplyTarget(msg, channelId), {
+      kind: 'text',
+      text: `已将会话 ${session.name} 的输出模式切换为 \`${arg}\`。`,
+    });
+  }
+
   private _renderSessionStatus(session: Session, pluginName: string): string {
     const binding = session.imBindings.find((item) => item.plugin === pluginName) ?? session.imBindings[0];
     const pending = session.messageQueue.filter(m => m.status === 'pending').length;
@@ -584,6 +634,7 @@ export class Daemon {
       `**会话：** \`${session.name}\``,
       `**状态：** ${session.status}`,
       `**运行态：** ${session.runtimeState ?? 'cold'}`,
+      `**输出模式：** ${session.streamVisibility}`,
       `**CLI 插件：** ${session.cliPlugin}`,
       `**工作目录：** ${session.workdir}`,
       `**绑定空间：** ${bindingLabel}`,
@@ -598,11 +649,16 @@ export class Daemon {
     const attached = sessions.filter(s => s.status === 'attached').length;
     const detached = sessions.filter(s => s.status === 'idle').length;
     const imProcessing = sessions.filter(s => s.status === 'im_processing').length;
+    const strategy = this._getMattermostConversationKind();
+    const openHint = strategy === 'channel'
+      ? '\n发送 `/list` 查看详细列表，`/open <name>` 定位到对应 channel。'
+      : '\n发送 `/list` 查看详细列表，`/open <name>` 定位到对应 thread。';
     return [
       `**mx-coder 全局状态**`,
       `会话总数：${total}`,
+      `默认空间策略：${strategy}`,
       `attached：${attached}　im_processing：${imProcessing}　idle：${detached}`,
-      total > 0 ? '\n发送 `/list` 查看详细列表，`/open <name>` 定位到对应 thread。' : '\n直接发送消息即可创建新会话。',
+      total > 0 ? openHint : '\n直接发送消息即可创建新会话。',
     ].join('\n');
   }
 
@@ -666,7 +722,7 @@ export class Daemon {
       '当前 mx-coder 会话：',
       ...lines,
       '',
-      '发送 /open <sessionName> 可在对应 thread 中收到定位消息。',
+      `发送 /open <sessionName> 可在对应${this._getMattermostConversationKind() === 'channel' ? ' channel' : ' thread'}中收到定位消息。`,
     ].join('\n');
   }
 
@@ -737,7 +793,7 @@ export class Daemon {
 
     await imPlugin.sendMessage(this._buildReplyTarget(msg, channelId), {
       kind: 'text',
-      text: `已强制接管会话 ${sessionName}。现在可在当前 thread 中继续对话。`,
+      text: `已强制接管会话 ${sessionName}。现在可在当前${msg.threadId ? ' thread' : ' channel'}中继续对话。`,
     });
     this._debugLog({ event: 'takeover_forced', sessionName, requestedBy: msg.userId });
   }
@@ -1066,14 +1122,15 @@ export class Daemon {
     this._server.handle('attach', async (args, actor, socket) => {
       const name = args['name'] as string;
       const pid = args['pid'] as number;
-      this.registry.reconcileProcessLiveness(name);
-      const session = this.registry.get(name);
-
-      if (!session) {
+      const existing = this.registry.get(name);
+      if (!existing) {
         const e = new Error(`Session not found: ${name}`) as Error & { code: ErrorCode };
         e.code = 'SESSION_NOT_FOUND';
         throw e;
       }
+
+      this.registry.reconcileProcessLiveness(name);
+      const session = this.registry.get(name)!;
 
       this._checkAcl(actor, 'attach', session);
 

@@ -5,6 +5,7 @@
  * argv[5] = imConfigPath, argv[6] = imPluginName, argv[7] = logPath
  */
 import { Daemon } from './daemon.js';
+import { loadMattermostConfig } from './plugins/im/mattermost.js';
 import * as path from 'path';
 import * as os from 'os';
 import * as fs from 'fs';
@@ -52,6 +53,9 @@ const daemon = new Daemon(socketPath, {
   ...(imConfigPath ? { imConfigPath } : {}),
   enableIM: true,
   imPluginName,
+  ...(imConfigPath
+    ? { imPluginConfig: loadMattermostConfig(imConfigPath) as unknown as Record<string, unknown> }
+    : {}),
 });
 
 if (pidFile) {

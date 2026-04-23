@@ -285,7 +285,7 @@ export class IMMessageDispatcher {
     if (!next) return;
 
     const { session, message } = next;
-    const streamToIM = new StreamToIM(this._resolveIMPlugin(message, session), this._buildTarget(message));
+    const streamToIM = new StreamToIM(this._resolveIMPlugin(message, session), this._buildTarget(message), session.streamVisibility);
     const wasUninitialized = session.initState === 'uninitialized';
 
     debugLog({

@@ -158,7 +158,6 @@ describe('Daemon IM 路由', () => {
     expect(binding?.channelId).toBe('channel-conv-1');
   });
 
-
   test('/open <sessionName> 在 thread 中对已绑定 session 发送锚点', async () => {
     const mockIM = new MockIMPlugin();
     (daemon as any)._imPlugin = mockIM;
@@ -177,6 +176,22 @@ describe('Daemon IM 路由', () => {
 
     const ack = mockIM.sent.find(s => s.target.threadId === 'requester-thread');
     expect(ack).toBeTruthy();
+  });
+
+  test('/stream 在绑定 thread 中可查询与切换当前会话输出模式', async () => {
+    const mockIM = new MockIMPlugin();
+    (daemon as any)._imPlugin = mockIM;
+    (daemon as any)._imPluginName = 'mattermost';
+
+    daemon.registry.create('stream-demo', { workdir: '/tmp', cliPlugin: 'claude-code' });
+    daemon.registry.bindIM('stream-demo', { plugin: 'mattermost', threadId: 'stream-thread', channelId: 'ch1' });
+
+    await (daemon as any)._handleIncomingIMMessage(makeMsg({ text: '/stream', threadId: 'stream-thread', isTopLevel: false }), 'ch1');
+    expect((mockIM.sent.at(-1)?.content as any).text).toContain('normal');
+
+    await (daemon as any)._handleIncomingIMMessage(makeMsg({ text: '/stream verbose', threadId: 'stream-thread', isTopLevel: false, messageId: 'msg-stream-2', dedupeKey: 'dedup-stream-2' }), 'ch1');
+    expect(daemon.registry.get('stream-demo')?.streamVisibility).toBe('verbose');
+    expect((mockIM.sent.at(-1)?.content as any).text).toContain('verbose');
   });
 
   test('/open <sessionName> 已有失效绑定时移除旧绑定并创建新 thread', async () => {

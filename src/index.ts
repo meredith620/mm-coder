@@ -253,19 +253,29 @@ function renderBashCompletion(): string {
   const commands = getCompletionCommands().join(' ');
   return `# bash completion for mx-coder
 _mx_coder_completions() {
-  local cur prev words cword
+  local cur prev command needs_session commands_with_sessions sessions
   cur="\${COMP_WORDS[COMP_CWORD]}"
   prev="\${COMP_WORDS[COMP_CWORD-1]}"
+  command="\${COMP_WORDS[1]}"
+  commands_with_sessions="attach open status remove diagnose takeover-status takeover-cancel"
 
   if [[ \${COMP_CWORD} -eq 1 ]]; then
     COMPREPLY=( $(compgen -W "${commands}" -- "\${cur}") )
     return 0
   fi
 
-  if [[ \${COMP_WORDS[1]} == "completion" ]]; then
+  if [[ \${command} == "completion" ]]; then
     COMPREPLY=( $(compgen -W "bash zsh sessions" -- "\${cur}") )
     return 0
   fi
+
+  for needs_session in \${commands_with_sessions}; do
+    if [[ \${command} == "\${needs_session}" && \${COMP_CWORD} -eq 2 ]]; then
+      sessions="$(mx-coder completion sessions 2>/dev/null)"
+      COMPREPLY=( $(compgen -W "\${sessions}" -- "\${cur}") )
+      return 0
+    fi
+  done
 }
 complete -F _mx_coder_completions mx-coder
 `;
@@ -276,10 +286,11 @@ function renderZshCompletion(): string {
   return `#compdef mx-coder
 
 _mxcoder() {
-  local -a commands
+  local -a commands session_commands sessions
   commands=(
     ${commands}
   )
+  session_commands=(attach open status remove diagnose takeover-status takeover-cancel)
 
   if (( CURRENT == 2 )); then
     _describe 'command' commands
@@ -288,6 +299,12 @@ _mxcoder() {
 
   if [[ \${words[2]} == completion ]]; then
     _values 'shell' bash zsh sessions
+    return
+  fi
+
+  if (( CURRENT == 3 )) && (( \${session_commands[(Ie)\${words[2]}]} <= \${#session_commands} )); then
+    sessions=(\${(f)"$(mx-coder completion sessions 2>/dev/null)"})
+    _describe 'session' sessions
     return
   fi
 }
@@ -552,6 +569,7 @@ async function handleAttach(args: Record<string, string | undefined>) {
     attachedPid: null,
     imWorkerPid: null,
     imWorkerCrashCount: 0,
+    streamVisibility: (sessionSummary.streamVisibility as Session['streamVisibility']) ?? 'normal',
     imBindings: [],
     messageQueue: [],
     createdAt: sessionSummary.createdAt instanceof Date ? sessionSummary.createdAt : new Date(String(sessionSummary.createdAt ?? Date.now())),

@@ -25,7 +25,7 @@ afterEach(async () => {
 describe('attach command', () => {
   test('attach idle session 成功', async () => {
     await client.send('create', { name: 'a1', workdir: '/tmp', cli: 'claude-code' });
-    const res = await client.send('attach', { name: 'a1', pid: 9999 });
+    const res = await client.send('attach', { name: 'a1', pid: process.pid });
     expect(res.ok).toBe(true);
 
     const listRes = await client.send('list', {});
