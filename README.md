@@ -1,10 +1,10 @@
-# mm-coder (Multi-modal Coder)
+# mx-coder (Multi-modal Coder)
 
 AI CLI 会话桥接工具 — 管理多个 AI CLI 会话，支持终端直接交互和 IM 远程交互。
 
 ## 解决什么问题
 
-在电脑前用终端操作 Claude Code 等 AI CLI 工具时体验很好，但离开电脑后就无法继续推进任务。mm-coder 让你通过 IM（Mattermost 等）远程继续与同一会话交互，回来后在终端无缝衔接。
+在电脑前用终端操作 Claude Code 等 AI CLI 工具时体验很好，但离开电脑后就无法继续推进任务。mx-coder 让你通过 IM（Mattermost 等）远程继续与同一会话交互，回来后在终端无缝衔接。
 
 ## 核心特性
 
@@ -19,11 +19,11 @@ AI CLI 会话桥接工具 — 管理多个 AI CLI 会话，支持终端直接交
 ## 使用流程
 
 ```bash
-mm-coder start                              # 启动后台服务（一次性）
-mm-coder create bug-fix --workdir ~/myapp   # 创建命名会话
+mx-coder start                              # 启动后台服务（一次性）
+mx-coder create bug-fix --workdir ~/myapp   # 创建命名会话
 
 # 终端交互（原生体验）
-mm-coder attach bug-fix                     # 直接进入 Claude Code
+mx-coder attach bug-fix                     # 直接进入 Claude Code
 # ... 正常工作 ...
 # 退出 Claude Code = 释放会话
 
@@ -38,22 +38,22 @@ mm-coder attach bug-fix                     # 直接进入 Claude Code
 # `/takeover <name>` 请求终端释放；`/takeover-force <name>` 立即接管
 
 # 回到终端
-mm-coder attach bug-fix                     # 再次进入，自动 resume
+mx-coder attach bug-fix                     # 再次进入，自动 resume
 ```
 
 ## Shell Completion
 
-mm-coder 已支持：
-- `mm-coder completion bash`：输出 bash 补全脚本
-- `mm-coder completion zsh`：输出 zsh 补全脚本
-- `mm-coder completion sessions`：输出当前可补全的 session 名（供 shell completion 内部调用）
+mx-coder 已支持：
+- `mx-coder completion bash`：输出 bash 补全脚本
+- `mx-coder completion zsh`：输出 zsh 补全脚本
+- `mx-coder completion sessions`：输出当前可补全的 session 名（供 shell completion 内部调用）
 
 ### Bash
 
 将以下内容加入 `~/.bashrc`：
 
 ```bash
-eval "$(mm-coder completion bash)"
+eval "$(mx-coder completion bash)"
 ```
 
 保存后执行：
@@ -67,7 +67,7 @@ source ~/.bashrc
 将以下内容加入 `~/.zshrc`：
 
 ```bash
-eval "$(mm-coder completion zsh)"
+eval "$(mx-coder completion zsh)"
 ```
 
 保存后执行：
@@ -84,7 +84,7 @@ source ~/.zshrc
 
 ### Mattermost
 
-创建 `~/.mm-coder/config.json`：
+创建 `~/.mx-coder/config.json`：
 
 ```json
 {

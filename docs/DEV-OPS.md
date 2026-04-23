@@ -1,4 +1,4 @@
-# mm-coder 开发运维手册
+# mx-coder 开发运维手册
 
 ## 环境要求
 
@@ -35,7 +35,7 @@ npm run build
 npm install -g .
 
 # 验证
-mm-coder --help
+mx-coder --help
 ```
 
 ### 使用 npm link（开发迭代时更方便）
@@ -44,36 +44,36 @@ mm-coder --help
 npm link
 ```
 
-修改源码后重新 `npm run build`，`mm-coder` 命令即反映最新构建结果。
+修改源码后重新 `npm run build`，`mx-coder` 命令即反映最新构建结果。
 
 ### Shell completion 安装
 
 #### Bash
 
 ```bash
-# 生成并加载 mm-coder bash completion
-eval "$(mm-coder completion bash)"
+# 生成并加载 mx-coder bash completion
+eval "$(mx-coder completion bash)"
 
 # 若希望每次打开 shell 自动生效，可写入 ~/.bashrc
-echo 'eval "$(mm-coder completion bash)"' >> ~/.bashrc
+echo 'eval "$(mx-coder completion bash)"' >> ~/.bashrc
 source ~/.bashrc
 ```
 
 #### Zsh
 
 ```bash
-# 生成并加载 mm-coder zsh completion
-eval "$(mm-coder completion zsh)"
+# 生成并加载 mx-coder zsh completion
+eval "$(mx-coder completion zsh)"
 
 # 若希望每次打开 shell 自动生效，可写入 ~/.zshrc
-echo 'eval "$(mm-coder completion zsh)"' >> ~/.zshrc
+echo 'eval "$(mx-coder completion zsh)"' >> ~/.zshrc
 source ~/.zshrc
 ```
 
 #### 动态 session 名补全说明
 
 ```bash
-mm-coder completion sessions
+mx-coder completion sessions
 ```
 
 该命令用于输出当前 daemon 中可补全的 session 名，供 shell completion 内部调用；无 session 时输出为空且不报错。
@@ -81,7 +81,7 @@ mm-coder completion sessions
 ### 卸载本地安装
 
 ```bash
-npm uninstall -g mm-coder
+npm uninstall -g mx-coder
 # 或
 npm unlink
 ```
@@ -138,7 +138,7 @@ npm run daemon
 ```
 npm run build
 npm pack
-npm install -g mm-coder-x.y.z.tgz
+npm install -g mx-coder-x.y.z.tgz
 ```
 ---
 
@@ -208,7 +208,7 @@ npx vitest run tests/unit/cli-plugin-registry.test.ts tests/unit/im-plugin-regis
    npm publish
    ```
 
-   若发布 scoped 包（如 `@org/mm-coder`），需加 `--access public`：
+   若发布 scoped 包（如 `@org/mx-coder`），需加 `--access public`：
 
    ```bash
    npm publish --access public
@@ -226,20 +226,20 @@ npx vitest run tests/unit/cli-plugin-registry.test.ts tests/unit/im-plugin-regis
 ## 终端用户安装
 
 ```bash
-npm install -g mm-coder
+npm install -g mx-coder
 ```
 
 验证：
 
 ```bash
-mm-coder --help
+mx-coder --help
 ```
 
 ---
 
 ## 常见问题
 
-**Q: 编译后执行 `mm-coder` 报 `ERR_UNKNOWN_FILE_EXTENSION`**
+**Q: 编译后执行 `mx-coder` 报 `ERR_UNKNOWN_FILE_EXTENSION`**
 
 `package.json` 中 `"type": "module"` 要求所有导入使用 `.js` 扩展名。检查 `dist/index.js` 的 shebang：
 

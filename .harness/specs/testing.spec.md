@@ -128,7 +128,7 @@ export class TestDaemon {
 
   static async start(): Promise<TestDaemon> {
     const daemon = new TestDaemon();
-    const socketPath = `/tmp/mm-coder-test-${Date.now()}.sock`;
+    const socketPath = `/tmp/mx-coder-test-${Date.now()}.sock`;
     if (existsSync(socketPath)) unlinkSync(socketPath);
     daemon.socketPath = socketPath;
     daemon.proc = fork('./dist/daemon.js', {
@@ -203,7 +203,7 @@ npm run daemon -- start &
 DAEMON_PID=$!
 sleep 2
 
-if ! nc -z /tmp/mm-coder-daemon.sock 2>/dev/null; then
+if ! nc -z /tmp/mx-coder-daemon.sock 2>/dev/null; then
   echo "✗ Daemon socket 未就绪"
   kill $DAEMON_PID 2>/dev/null || true
   exit 1
@@ -223,16 +223,16 @@ source "$(dirname "$0")/assert.sh"
 
 echo "测试: Session 完整生命周期"
 
-OUTPUT=$(mm-coder create test-session --workdir /tmp)
+OUTPUT=$(mx-coder create test-session --workdir /tmp)
 assert_contains "$OUTPUT" "created" "创建应成功"
 
-OUTPUT=$(mm-coder list)
+OUTPUT=$(mx-coder list)
 assert_contains "$OUTPUT" "test-session" "列表应包含 test-session"
 
-OUTPUT=$(mm-coder remove test-session)
+OUTPUT=$(mx-coder remove test-session)
 assert_contains "$OUTPUT" "removed" "删除应成功"
 
-OUTPUT=$(mm-coder list)
+OUTPUT=$(mx-coder list)
 assert_not_contains "$OUTPUT" "test-session" "列表不应包含 test-session"
 
 echo "✓ Session 生命周期测试通过"

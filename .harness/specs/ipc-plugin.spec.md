@@ -19,7 +19,7 @@
 
 ### Unix Socket 接口
 
-**Socket 路径**: `~/.config/mm-coder/daemon.sock`（用户目录，权限 600）
+**Socket 路径**: `~/.config/mx-coder/daemon.sock`（用户目录，权限 600）
 
 **协议格式**: JSON 行（JSON Lines，newline-delimited JSON）
 
@@ -139,18 +139,18 @@ interface CLIPlugin {
 ### 配置文件
 
 ```yaml
-# ~/.config/mm-coder/config.yaml
+# ~/.config/mx-coder/config.yaml
 plugins:
   im:
     - name: mattermost
-      package: "@mm-coder/plugin-mattermost"
+      package: "@mx-coder/plugin-mattermost"
       config:
         url: https://mattermost.example.com
         token: bot-token
         channelId: default-channel
   cli:
     - name: claude-code
-      package: "@mm-coder/plugin-claude-code"
+      package: "@mx-coder/plugin-claude-code"
       permissions:
         autoAllow: [Read, Grep, Glob, WebSearch, LSP]
         autoDeny: ["Bash:rm -rf", "Bash:drop", "Bash:truncate"]
@@ -161,10 +161,10 @@ defaults:
   workdir: ~/projects
 
 persistence:
-  path: ~/.config/mm-coder/sessions.json
+  path: ~/.config/mx-coder/sessions.json
 
 ipc:
-  socketPath: ~/.config/mm-coder/daemon.sock
+  socketPath: ~/.config/mx-coder/daemon.sock
 ```
 
 ### 加载流程
@@ -180,7 +180,7 @@ daemon 启动
 
 ## MCP Permission Server
 
-daemon 充当 MCP server，IM worker 通过 `--permission-prompt-tool mm-coder-permission` 连接。
+daemon 充当 MCP server，IM worker 通过 `--permission-prompt-tool mx-coder-permission` 连接。
 
 ### can_use_tool 请求处理
 

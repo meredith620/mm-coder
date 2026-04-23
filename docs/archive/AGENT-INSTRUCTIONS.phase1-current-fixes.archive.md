@@ -1,13 +1,13 @@
 # 给下游 Claude Code agent 的执行指令（阶段 1：当前问题修复）
 
-你现在接手 mm-coder (Multi-modal Coder) 的**阶段 1：当前问题修复**工作。你运行在 Claude Code CLI 中，请严格遵循现有设计与文档，不要重新发散架构。
+你现在接手 mx-coder (Multi-modal Coder) 的**阶段 1：当前问题修复**工作。你运行在 Claude Code CLI 中，请严格遵循现有设计与文档，不要重新发散架构。
 
 ## 你的目标
 
 修复当前已经明确暴露的现实问题，并保证修复方式与 resident worker 主设计一致：
 
 1. Mattermost **typing indicator 不生效**
-2. `mm-coder remove <name>` 后 **Claude worker 进程残留**
+2. `mx-coder remove <name>` 后 **Claude worker 进程残留**
 3. 如有必要，对 Mattermost **WebSocket keepalive** 做最小必要补强
 
 ## 你必须先阅读的文档（按顺序）

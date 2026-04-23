@@ -6,7 +6,7 @@ import { createInterface } from 'readline';
 import type { Readable } from 'stream';
 import type { Session, CLIEvent, StreamCursor } from '../../types.js';
 import type { CLIPlugin, CommandSpec } from '../types.js';
-import { generateBridgeMcpConfig, MM_CODER_PERMISSION_TOOL_NAME } from '../../mcp-bridge.js';
+import { generateBridgeMcpConfig, MX_CODER_PERMISSION_TOOL_NAME } from '../../mcp-bridge.js';
 
 export function getClaudeProjectPath(workdir: string): string {
   const normalizedWorkdir = path.resolve(workdir).replace(/[\\/]/g, '-');
@@ -79,7 +79,7 @@ export class ClaudeCodePlugin implements CLIPlugin {
         '--output-format', 'stream-json',
         '--verbose',
         '--mcp-config', JSON.stringify(generateBridgeMcpConfig(bridgeScriptPath)),
-        '--permission-prompt-tool', MM_CODER_PERMISSION_TOOL_NAME,
+        '--permission-prompt-tool', MX_CODER_PERMISSION_TOOL_NAME,
       ],
     };
   }

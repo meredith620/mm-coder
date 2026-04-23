@@ -77,7 +77,7 @@ if [[ -n "${FILES["harness"]}" ]]; then
     COMMIT_COUNT=$((COMMIT_COUNT + 1))
     echo -e "${BLUE}提交 $COMMIT_COUNT: Harness 架构${NC}"
     echo "  git add .harness/ AGENTS.md harness.yaml"
-    echo "  git commit -m \"harness: adapt to mm-coder TypeScript project\""
+    echo "  git commit -m \"harness: adapt to mx-coder TypeScript project\""
     echo ""
 fi
 

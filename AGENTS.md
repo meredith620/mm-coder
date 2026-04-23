@@ -8,7 +8,7 @@
 # created: 2026-04-01
 ---
 
-# AGENTS.md - mm-coder Harness
+# AGENTS.md - mx-coder Harness
 
 > **Agent 通用入口文档** —— 适用于 Claude Code、Agent 等任何 Agent 系统
 >
@@ -16,7 +16,7 @@
 
 ## 项目概览
 
-**mm-coder** 是 AI CLI 会话桥接工具：管理多个 AI CLI 会话，支持终端直接交互和 IM（Instant Messaging）远程交互，两端交替使用同一会话上下文。
+**mx-coder** 是 AI CLI 会话桥接工具：管理多个 AI CLI 会话，支持终端直接交互和 IM（Instant Messaging）远程交互，两端交替使用同一会话上下文。
 
 | 属性 | 值 |
 |------|-----|
@@ -99,7 +99,7 @@ chmod +x .git/hooks/pre-commit
 ## 项目结构
 
 ```
-mm-coder/
+mx-coder/
 ├── AGENTS.md                 ⭐ Agent 通用入口（本文档）
 ├── harness.yaml              ⭐ Harness Manifest
 ├── .harness/                 📁 Harness 架构目录（与项目代码分离）
@@ -118,7 +118,7 @@ mm-coder/
 │   │   └── prepare-commit.sh
 │   └── guards/               🛡️ 熵防护规则
 │       ├── protect-harness-files.rule
-│       ├── no-direct-config-modification.rule   ⚠️ mm-coder 不适用（无配置文件）
+│       ├── no-direct-config-modification.rule   ⚠️ mx-coder 不适用（无配置文件）
 │       ├── require-test-coverage.rule
 │       ├── enforce-layer-separation.rule
 │       └── enforce-atomic-commits.rule
@@ -252,7 +252,7 @@ Agent 应根据任务类型加载对应规范：
 - 在 `src/` 目录下直接 import IM 插件的实现代码（必须通过插件接口）
 - 在 `src/daemon.ts` 中硬编码 CLI Plugin 的具体实现
 - 删除 `tests/` 中的测试（功能必须有测试覆盖）
-- 直接修改 `~/.config/mm-coder/sessions.json` 而不通过 daemon API
+- 直接修改 `~/.config/mx-coder/sessions.json` 而不通过 daemon API
 
 ✅ **始终:**
 - 提交前运行 `./.harness/scripts/pre-commit.sh`

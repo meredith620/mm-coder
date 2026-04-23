@@ -13,15 +13,15 @@ import { getClaudeSessionPath, hasClaudeSession } from './plugins/cli/claude-cod
 import { getIMPluginFactory, getDefaultIMPluginName } from './plugins/im/registry.js';
 import type { Session } from './types.js';
 
-const SOCKET_PATH = process.env.MM_CODER_SOCKET ?? path.join(os.tmpdir(), 'mm-coder-daemon.sock');
-const PID_FILE = process.env.MM_CODER_PID_FILE ?? path.join(os.tmpdir(), 'mm-coder-daemon.pid');
-const PERSISTENCE_PATH = process.env.MM_CODER_SESSIONS ?? path.join(os.homedir(), '.mm-coder', 'sessions.json');
-const LOG_PATH = process.env.MM_CODER_LOG ?? path.join(os.homedir(), '.mm-coder', 'daemon.log');
+const SOCKET_PATH = process.env.MX_CODER_SOCKET ?? path.join(os.tmpdir(), 'mx-coder-daemon.sock');
+const PID_FILE = process.env.MX_CODER_PID_FILE ?? path.join(os.tmpdir(), 'mx-coder-daemon.pid');
+const PERSISTENCE_PATH = process.env.MX_CODER_SESSIONS ?? path.join(os.homedir(), '.mx-coder', 'sessions.json');
+const LOG_PATH = process.env.MX_CODER_LOG ?? path.join(os.homedir(), '.mx-coder', 'daemon.log');
 const VERSION = BUILD_VERSION;
 const GIT_HASH = BUILD_GIT_HASH;
 
 function printVersion() {
-  console.log(`mm-coder ${VERSION} (${GIT_HASH})`);
+  console.log(`mx-coder ${VERSION} (${GIT_HASH})`);
 }
 
 async function waitForDaemonStop(pid: number, timeoutMs = 10_000): Promise<boolean> {
@@ -175,10 +175,10 @@ async function main() {
 
 function printHelp() {
   console.log(`
-mm-coder - Multi-modal Claude Code session manager
+mx-coder - Multi-modal Claude Code session manager
 
 USAGE:
-  mm-coder <command> [options]
+  mx-coder <command> [options]
 
 COMMANDS:
   start                           Start daemon in background
@@ -209,22 +209,22 @@ COMMANDS:
   --version, -v                   Show version info
 
 EXAMPLES:
-  mm-coder start
-  mm-coder start-fg
-  mm-coder create bug-fix -w ~/myapp
-  mm-coder attach bug-fix -n my-session
-  mm-coder diagnose bug-fix
-  mm-coder takeover-status bug-fix
-  mm-coder takeover-cancel bug-fix
-  mm-coder list
-  mm-coder status bug-fix -n my-session
-  mm-coder remove bug-fix -n my-session
-  mm-coder completion bash
-  mm-coder completion zsh
-  mm-coder completion sessions
-  mm-coder im init -p discord
-  mm-coder im verify
-  mm-coder im init -c ~/.mm-coder/discord.json
+  mx-coder start
+  mx-coder start-fg
+  mx-coder create bug-fix -w ~/myapp
+  mx-coder attach bug-fix -n my-session
+  mx-coder diagnose bug-fix
+  mx-coder takeover-status bug-fix
+  mx-coder takeover-cancel bug-fix
+  mx-coder list
+  mx-coder status bug-fix -n my-session
+  mx-coder remove bug-fix -n my-session
+  mx-coder completion bash
+  mx-coder completion zsh
+  mx-coder completion sessions
+  mx-coder im init -p discord
+  mx-coder im verify
+  mx-coder im init -c ~/.mx-coder/discord.json
 `.trim());
 }
 
@@ -251,8 +251,8 @@ function getCompletionCommands(): string[] {
 
 function renderBashCompletion(): string {
   const commands = getCompletionCommands().join(' ');
-  return `# bash completion for mm-coder
-_mm_coder_completions() {
+  return `# bash completion for mx-coder
+_mx_coder_completions() {
   local cur prev words cword
   cur="\${COMP_WORDS[COMP_CWORD]}"
   prev="\${COMP_WORDS[COMP_CWORD-1]}"
@@ -267,15 +267,15 @@ _mm_coder_completions() {
     return 0
   fi
 }
-complete -F _mm_coder_completions mm-coder
+complete -F _mx_coder_completions mx-coder
 `;
 }
 
 function renderZshCompletion(): string {
   const commands = getCompletionCommands().map((command) => `'${command}:${command}'`).join(' ');
-  return `#compdef mm-coder
+  return `#compdef mx-coder
 
-_mm_coder() {
+_mxcoder() {
   local -a commands
   commands=(
     ${commands}
@@ -292,7 +292,7 @@ _mm_coder() {
   fi
 }
 
-_mm_coder "$@"
+_mxcoder "$@"
 `;
 }
 
@@ -318,7 +318,7 @@ async function handleCompletion(args: Record<string, string | undefined>) {
   }
 
   if (shell !== 'bash' && shell !== 'zsh') {
-    throw new Error('Missing or unsupported shell. Usage: mm-coder completion <bash|zsh|sessions>');
+    throw new Error('Missing or unsupported shell. Usage: mx-coder completion <bash|zsh|sessions>');
   }
 
   if (shell === 'bash') {
@@ -793,7 +793,7 @@ async function handleImInit(args: Record<string, string | undefined>) {
     console.log('Next steps:');
     console.log(`  1. Edit ${configPath}`);
     console.log(`  2. Fill in your ${pluginName} configuration`);
-    console.log(`  3. Run: mm-coder im verify -p ${pluginName}`);
+    console.log(`  3. Run: mx-coder im verify -p ${pluginName}`);
   } catch (err) {
     throw new Error((err as Error).message);
   }

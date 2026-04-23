@@ -1,4 +1,4 @@
-// Core domain types for mm-coder
+// Core domain types for mx-coder
 
 export type RuntimeState = 'cold' | 'ready' | 'running' | 'waiting_approval' | 'attached_terminal' | 'takeover_pending' | 'recovering' | 'error';
 

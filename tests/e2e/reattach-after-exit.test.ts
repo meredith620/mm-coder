@@ -15,7 +15,7 @@ describe('Re-attach after CLI exit E2E', () => {
   let daemonProc: ChildProcess | null = null;
 
   beforeEach(async () => {
-    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'mm-coder-reattach-test-'));
+    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'mx-coder-reattach-test-'));
     socketPath = path.join(tmpDir, 'daemon.sock');
     const persistencePath = path.join(tmpDir, 'sessions.json');
 

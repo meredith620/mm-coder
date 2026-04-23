@@ -1,4 +1,4 @@
-# mm-coder (Multi-modal Coder) Mattermost 设计差距清单
+# mx-coder (Multi-modal Coder) Mattermost 设计差距清单
 
 > **文档生命周期**：这是“实现前收口用”的阶段性 gap 文档。它的价值在于帮助 AI agent 和 reviewer 快速判断“当前代码离目标设计还差什么”。  
 > 当相应缺口被实现并由测试覆盖后，应及时缩减、更新；当前文档只保留**仍未关闭**的 gap，避免已关闭项与待办项并存造成双真值。

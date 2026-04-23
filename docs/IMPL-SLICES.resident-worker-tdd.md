@@ -1,4 +1,4 @@
-# mm-coder (Multi-modal Coder) 实现切片清单（常驻 IM worker / TDD）
+# mx-coder (Multi-modal Coder) 实现切片清单（常驻 IM worker / TDD）
 
 > 面向 AI agent 执行。每个切片必须遵循：先补测试，再做最小实现，再跑对应测试，再提交。  
 > 本文对应的新架构前提：**每个活跃 IM session 一个常驻 Claude 进程，后续消息通过 stdin.write(JSONL) 连续投递；消息完成边界以 `result` 事件为准。**
@@ -31,7 +31,7 @@
 2. **先红后绿。** 先写失败测试，再补实现。
 3. **以事件边界而不是进程退出作为真值。** 常驻 worker 下，`result` 才是一条消息完成的提交点。
 4. **控制权切换优先于吞吐。** attach/takeover 时，必须先保证不会有两个 Claude 进程同时驱动同一 session。
-5. **busy/idle 只能外部推断。** Claude Code 没有状态查询 API，状态必须由 mm-coder 基于事件流维护。
+5. **busy/idle 只能外部推断。** Claude Code 没有状态查询 API，状态必须由 mx-coder 基于事件流维护。
 
 ---
 
@@ -394,7 +394,7 @@
 - `npm test`
 
 **提交建议**
-- `docs(mm-coder): sync resident worker architecture and implementation slices`
+- `docs(mx-coder): sync resident worker architecture and implementation slices`
 
 ---
 

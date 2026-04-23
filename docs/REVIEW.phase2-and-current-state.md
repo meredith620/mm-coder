@@ -1,4 +1,4 @@
-# mm-coder (Multi-modal Coder) 最终 review、官方语义核对与后续实施指令
+# mx-coder (Multi-modal Coder) 最终 review、官方语义核对与后续实施指令
 
 > **文档生命周期**：这是本轮最终收口文档。用于记录：1) 对当前修复实现的再 review；2) Mattermost typing 官方语义核对结论；3) Mattermost channel 绑定合理性讨论结果；4) 给下一位 Claude Code agent 的执行入口。  
 > 当相关实现继续变化后，应更新本文件；若这些结论全部吸收到 SPEC / TODO / IMPL-SLICES 中并稳定，可将本文件转为归档材料。

@@ -2,8 +2,8 @@ import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
 
-export const MM_CODER_BRIDGE_SERVER_NAME = 'mm_coder_bridge';
-export const MM_CODER_PERMISSION_TOOL_NAME = `mcp__${MM_CODER_BRIDGE_SERVER_NAME}__can_use_tool`;
+export const MX_CODER_BRIDGE_SERVER_NAME = 'mx_coder_bridge';
+export const MX_CODER_PERMISSION_TOOL_NAME = `mcp__${MX_CODER_BRIDGE_SERVER_NAME}__can_use_tool`;
 
 const BRIDGE_TEMPLATE = `#!/usr/bin/env node
 'use strict';
@@ -91,7 +91,7 @@ rl.on('line', line => {
       result: {
         tools: [{
           name: TOOL_NAME,
-          description: 'Bridge mm-coder approval checks to daemon ApprovalHandler',
+          description: 'Bridge mx-coder approval checks to daemon ApprovalHandler',
           inputSchema: {
             type: 'object',
             properties: {
@@ -128,7 +128,7 @@ rl.on('line', line => {
 export function generateBridgeMcpConfig(scriptPath: string): { mcpServers: Record<string, { command: string; args: string[] }> } {
   return {
     mcpServers: {
-      [MM_CODER_BRIDGE_SERVER_NAME]: {
+      [MX_CODER_BRIDGE_SERVER_NAME]: {
         command: 'node',
         args: [scriptPath],
       },
@@ -147,7 +147,7 @@ export async function generateBridgeScript(
   const content = BRIDGE_TEMPLATE
     .replace(/__SESSION_ID__/g, sessionId)
     .replace(/__SOCKET_PATH__/g, socketPath)
-    .replace(/__SERVER_NAME__/g, MM_CODER_BRIDGE_SERVER_NAME);
+    .replace(/__SERVER_NAME__/g, MX_CODER_BRIDGE_SERVER_NAME);
 
   fs.writeFileSync(scriptPath, content, { mode: 0o600 });
 

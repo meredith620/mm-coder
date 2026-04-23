@@ -1,5 +1,5 @@
 import { describe, test, expect, beforeEach, afterEach } from 'vitest';
-import { generateBridgeScript, generateBridgeMcpConfig, MM_CODER_BRIDGE_SERVER_NAME, MM_CODER_PERMISSION_TOOL_NAME } from '../../src/mcp-bridge.js';
+import { generateBridgeScript, generateBridgeMcpConfig, MX_CODER_BRIDGE_SERVER_NAME, MX_CODER_PERMISSION_TOOL_NAME } from '../../src/mcp-bridge.js';
 import * as net from 'net';
 import * as fs from 'fs';
 import * as os from 'os';
@@ -11,7 +11,7 @@ describe('MCP Bridge script generation', () => {
   let socketPath: string;
 
   beforeEach(() => {
-    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'mm-coder-bridge-test-'));
+    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'mx-coder-bridge-test-'));
     socketPath = path.join(tmpDir, 'daemon.sock');
   });
 
@@ -37,15 +37,15 @@ describe('MCP Bridge script generation', () => {
   });
 
   test('生成 mcp config，server 名与 permission tool 名符合 Claude MCP 约定', () => {
-    const config = generateBridgeMcpConfig('/tmp/mm-coder-bridge.js');
+    const config = generateBridgeMcpConfig('/tmp/mx-coder-bridge.js');
 
     expect(config.mcpServers).toEqual({
-      [MM_CODER_BRIDGE_SERVER_NAME]: {
+      [MX_CODER_BRIDGE_SERVER_NAME]: {
         command: 'node',
-        args: ['/tmp/mm-coder-bridge.js'],
+        args: ['/tmp/mx-coder-bridge.js'],
       },
     });
-    expect(MM_CODER_PERMISSION_TOOL_NAME).toBe('mcp__mm_coder_bridge__can_use_tool');
+    expect(MX_CODER_PERMISSION_TOOL_NAME).toBe('mcp__mx_coder_bridge__can_use_tool');
   });
 
   test('bridge 作为 MCP stdio server 暴露 can_use_tool 并转发到 approval socket', async () => {

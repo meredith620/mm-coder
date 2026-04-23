@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Daemon entry point — invoked by `mm-coder start` as a detached child process.
+ * Daemon entry point — invoked by `mx-coder start` as a detached child process.
  * argv[2] = socketPath, argv[3] = pidFile, argv[4] = persistencePath,
  * argv[5] = imConfigPath, argv[6] = imPluginName, argv[7] = logPath
  */
@@ -12,7 +12,7 @@ import { getDefaultIMPluginName } from './plugins/im/registry.js';
 
 const socketPath = process.argv[2];
 const pidFile = process.argv[3];
-const persistencePath = process.argv[4] ?? path.join(os.homedir(), '.mm-coder', 'sessions.json');
+const persistencePath = process.argv[4] ?? path.join(os.homedir(), '.mx-coder', 'sessions.json');
 const imConfigPath = process.argv[5];
 const imPluginName = process.argv[6] ?? getDefaultIMPluginName();
 const logPath = process.argv[7];
@@ -59,7 +59,7 @@ if (pidFile) {
 }
 
 daemon.start().then(() => {
-  process.stdout.write(`mm-coder daemon listening on ${socketPath}\n`);
+  process.stdout.write(`mx-coder daemon listening on ${socketPath}\n`);
 }).catch(err => {
   process.stderr.write(`Daemon failed to start: ${(err as Error).message}\n`);
   process.exit(1);

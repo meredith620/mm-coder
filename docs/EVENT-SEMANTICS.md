@@ -1,4 +1,4 @@
-# mm-coder (Multi-modal Coder) 事件语义护栏
+# mx-coder (Multi-modal Coder) 事件语义护栏
 
 > **文档生命周期**：这是常驻 IM worker 架构下的长期护栏文档，不是临时设计草稿。  
 > 当 Claude stream-json 事件模型、IPC 事件名、attach/takeover/approval 的事件协议、或 dispatcher/worker 的消息边界判定发生变化时，必须同步更新本文件。  
@@ -8,7 +8,7 @@
 
 ## 1. 目标
 
-本文件定义 mm-coder 在常驻 IM worker 模式下的**事件语义真值**，避免以下常见错误：
+本文件定义 mx-coder 在常驻 IM worker 模式下的**事件语义真值**，避免以下常见错误：
 - 把“消息完成”错误绑定到进程退出
 - daemon 与 CLI 各自使用不同的 attach waiter 事件名
 - approval / takeover / attach 对同一事件的理解不一致
@@ -18,7 +18,7 @@
 
 ## 2. 事件来源分层
 
-mm-coder 里有三类事件，不能混为一谈：
+mx-coder 里有三类事件，不能混为一谈：
 
 1. **Claude stdout 事件**
    - 来源：`claude -p --input-format stream-json --output-format stream-json`
@@ -32,7 +32,7 @@ mm-coder 里有三类事件，不能混为一谈：
    - 来源：daemon → CLI/TUI 长连接
    - 例：`session_state_changed`、attach waiter 唤醒事件
 
-原则：**Claude 事件负责描述一轮消息处理过程；IPC 事件负责描述 mm-coder 控制面状态变化；二者不可互相替代。**
+原则：**Claude 事件负责描述一轮消息处理过程；IPC 事件负责描述 mx-coder 控制面状态变化；二者不可互相替代。**
 
 ---
 
@@ -209,7 +209,7 @@ attach 不是普通状态切换，而是**控制端切换**：
 
 ## 8. typing indicator 语义
 
-1. typing indicator 不是 Claude Code 原生状态，而是 mm-coder 基于 `runtimeState=running` 派生出的 IM 侧提示行为。
+1. typing indicator 不是 Claude Code 原生状态，而是 mx-coder 基于 `runtimeState=running` 派生出的 IM 侧提示行为。
 2. typing 只在“当前轮正在执行且最近仍有新的 Claude 流事件”时发送。
 3. 以下状态不得发送 typing：
    - `ready`

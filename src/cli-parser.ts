@@ -11,7 +11,7 @@ export interface ParsedCLI {
 }
 
 /**
- * Parse mm-coder CLI arguments into a structured object.
+ * Parse mx-coder CLI arguments into a structured object.
      * Supports: create, attach, diagnose, takeover-status, takeover-cancel, import, list, status, remove, start, stop, restart, completion, open, im <init|verify|run>, tui
  * Backward compatible: im-init → im init, im-verify → im verify, im-run → im run
  */

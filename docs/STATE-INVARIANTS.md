@@ -1,4 +1,4 @@
-# mm-coder (Multi-modal Coder) 状态不变量护栏
+# mx-coder (Multi-modal Coder) 状态不变量护栏
 
 > **文档生命周期**：这是常驻 IM worker 架构下的长期护栏文档，不是一次性设计笔记。  
 > 当 `Session` 字段、状态机、runtimeState、attach/takeover/approval 语义发生变化时，必须同步更新本文件。若代码与本文件冲突，以“经测试验证后的代码 + 已确认的 SPEC”作为修订依据，然后回写本文件，而不是放任漂移。  
@@ -8,7 +8,7 @@
 
 ## 1. 目标
 
-本文件定义 mm-coder 在“每个活跃 IM session 一个常驻 Claude 进程”模型下的**状态不变量**。这些不变量用于：
+本文件定义 mx-coder 在“每个活跃 IM session 一个常驻 Claude 进程”模型下的**状态不变量**。这些不变量用于：
 - 约束实现，避免 `status` / `runtimeState` / pid / queue / approval 互相漂移
 - 指导测试，尤其是 unit / integration 中的 invariant tests
 - 帮助 agent 在改动前先检查自己是否破坏控制面真值
@@ -17,7 +17,7 @@
 
 ## 2. 核心状态层次
 
-mm-coder 的状态分三层：
+mx-coder 的状态分三层：
 
 1. **控制面状态 `status`**
    - `idle | attach_pending | attached | im_processing | approval_pending | takeover_pending | error`

@@ -1,6 +1,6 @@
 # 给下游 Claude Code agent 的执行指令（phase2-final：最终收口）
 
-你现在接手 mm-coder (Multi-modal Coder) 的 **phase2-final：最终收口** 工作。你运行在 Claude Code CLI 中，请不要直接进入 phase3 功能实现，先把 phase2 的最后残项收口。
+你现在接手 mx-coder (Multi-modal Coder) 的 **phase2-final：最终收口** 工作。你运行在 Claude Code CLI 中，请不要直接进入 phase3 功能实现，先把 phase2 的最后残项收口。
 
 ## 你的目标
 

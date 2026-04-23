@@ -1,11 +1,11 @@
 {
-  "name": "mm-coder",
-  "version": "0.1.0",
+  "name": "mx-coder",
+  "version": "0.2.0",
   "description": "AI CLI session bridge — manage multiple AI CLI sessions with terminal and IM access",
   "type": "module",
   "main": "dist/index.js",
   "bin": {
-    "mm-coder": "dist/index.js"
+    "mx-coder": "dist/index.js"
   },
   "scripts": {
     "build": "node scripts/write-build-info.mjs && tsc",

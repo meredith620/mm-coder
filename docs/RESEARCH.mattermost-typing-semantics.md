@@ -1,7 +1,7 @@
-# mm-coder (Multi-modal Coder) Mattermost typing 官方语义核对
+# mx-coder (Multi-modal Coder) Mattermost typing 官方语义核对
 
 > **文档生命周期**：这是针对 Mattermost typing 用法的官方语义核对文档。它的作用是为 reviewer 与后续 AI agent 提供“当前实现是否符合官方语义”的判断依据。  
-> 当 Mattermost 官方文档、客户端实践、或 mm-coder 的 typing 实现发生变化时，应更新本文件；如果后续 typing 实现从一个 REST 路径切换到另一个官方已确认路径，也应在这里记录迁移理由与证据。
+> 当 Mattermost 官方文档、客户端实践、或 mx-coder 的 typing 实现发生变化时，应更新本文件；如果后续 typing 实现从一个 REST 路径切换到另一个官方已确认路径，也应在这里记录迁移理由与证据。
 
 ---
 
@@ -12,11 +12,11 @@
 2. `POST /users/me/typing` 是否存在并可用
 3. `POST /users/{user_id}/typing` 是否才是真实 REST endpoint
 4. WebSocket `user_typing` 是客户端 action 还是服务端事件
-5. 当前 mm-coder 实现是否需要从当前 REST 路径修正到官方 REST 真值，或改为 WebSocket action
+5. 当前 mx-coder 实现是否需要从当前 REST 路径修正到官方 REST 真值，或改为 WebSocket action
 
 ---
 
-## 2. 当前 mm-coder 实现
+## 2. 当前 mx-coder 实现
 
 当前实现（`src/plugins/im/mattermost.ts`）：
 - `sendTyping()` 调用 `POST /api/v4/users/{user_id}/typing`
@@ -76,7 +76,7 @@
 当前结论已经不是“REST 真值未知”，而是：
 
 1. **官方已确认的 REST typing endpoint 是 `POST /api/v4/users/{user_id}/typing`**
-2. 当前 mm-coder 实现已修正到 `POST /api/v4/users/{user_id}/typing`，**与当前已确认的官方路径一致**
+2. 当前 mx-coder 实现已修正到 `POST /api/v4/users/{user_id}/typing`，**与当前已确认的官方路径一致**
 3. 当前实现的 body 语义（`channel_id` + thread 场景 `parent_id`）与官方文档一致
 4. 因此本轮重点已从“路径待修正”转为“保留 `/users/me/typing` 为未证实 alias 的历史说明，避免文档回退到旧真值”
 

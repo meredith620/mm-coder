@@ -12,7 +12,7 @@ import { MockCLIPlugin } from '../helpers/mock-cli-plugin.js';
 /**
  * E2E: stdio IM 插件完整链路测试
  *
- * 验证：stdin → mm-coder → mock claude → mm-coder → stdout
+ * 验证：stdin → mx-coder → mock claude → mx-coder → stdout
  * 不依赖真实 Mattermost，通过管道模拟完整收发消息流程
  */
 describe('StdioIMPlugin 完整链路 E2E', () => {

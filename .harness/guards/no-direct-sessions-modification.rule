@@ -3,7 +3,7 @@
 
 name: no-direct-sessions-modification
 severity: error
-description: 禁止直接修改 sessions.json，必须通过 mm-coder 命令或 daemon IPC API
+description: 禁止直接修改 sessions.json，必须通过 mx-coder 命令或 daemon IPC API
 
 patterns:
   # 直接 shell 写入 sessions.json
@@ -19,7 +19,7 @@ message: |
   ⛔ 禁止直接修改 sessions.json！
 
   sessions.json 必须通过以下方式修改：
-  1. mm-coder CLI: mm-coder create / remove / attach
+  1. mx-coder CLI: mx-coder create / remove / attach
   2. daemon IPC: 通过 Unix socket 发送命令
 
   直接修改 sessions.json 会导致：
@@ -28,8 +28,8 @@ message: |
   - 正在运行的 IM worker 无法感知元数据变更
 
   如果需要临时调试，请使用：
-  mm-coder status   # 查看当前状态（只读）
-  mm-coder list     # 列出所有 session（只读）
+  mx-coder status   # 查看当前状态（只读）
+  mx-coder list     # 列出所有 session（只读）
 
 exceptions:
   # 允许测试中的临时文件

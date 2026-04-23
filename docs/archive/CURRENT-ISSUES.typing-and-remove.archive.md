@@ -1,4 +1,4 @@
-# mm-coder (Multi-modal Coder) 当前版本问题排查与修复归档
+# mx-coder (Multi-modal Coder) 当前版本问题排查与修复归档
 
 > **文档生命周期**：本文件原用于指导修复当前明确暴露的现实问题。相关修复已完成并通过针对性测试，现转为归档/核对材料。若后续行为回归，应以当前测试与实现为准重新开启新问题文档，而不是继续沿用本文件中的旧“待修复”表述。  
 > **补充说明**：其中 typing 的“行为语义修复”已完成，但当前实现所用 REST 路径与本轮再核实拿到的官方 REST API reference 真值仍未完全对齐，因此 typing 不能再表述为“连路径都已被官方完全确认收口”。
@@ -10,7 +10,7 @@
 本轮已完成并验证以下问题：
 
 1. **Mattermost typing indicator 不生效**
-2. **`mm-coder remove <name>` 后托管 Claude worker 进程残留**
+2. **`mx-coder remove <name>` 后托管 Claude worker 进程残留**
 3. **Mattermost heartbeat ack 关联过宽的最小必要补强**
 
 约束保持不变：
@@ -56,7 +56,7 @@
 ### 补充修复：typing 状态误判
 后续又发现一个更细的状态语义问题：
 - 当 Claude 已暂时停止产出、正在等待下一步输入，但当前轮尚未被粗粒度地判定结束时
-- mm-coder 仍可能持续续发 Mattermost typing，造成人工观察上的“Claude 已停，但 Mattermost 仍显示 typing”
+- mx-coder 仍可能持续续发 Mattermost typing，造成人工观察上的“Claude 已停，但 Mattermost 仍显示 typing”
 
 本轮已做的最小修复：
 - typing 续发除了要求 `runtimeState=running`，还要求“最近仍有新的 Claude 流事件”

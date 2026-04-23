@@ -1,4 +1,4 @@
-# mm-coder (Multi-modal Coder) 后续功能规划与 TDD 切片（phase3 候选）
+# mx-coder (Multi-modal Coder) 后续功能规划与 TDD 切片（phase3 候选）
 
 > **文档生命周期**：这是“resident worker 主架构收口后”的后续功能规划文档。它不是长期不可变的规格文档，而是下一阶段功能排期与实施切片的执行入口。  
 > 当以下任一前提发生变化时，需要更新本文件：
@@ -15,7 +15,7 @@
 本文覆盖以下 3 个后续功能方向：
 
 1. 为 Mattermost 提供**可配置的会话空间策略**：`thread`（默认）或 `channel`
-2. 为 mm-coder CLI 增加 **tab 补全**
+2. 为 mx-coder CLI 增加 **tab 补全**
 3. 实现并扩展 **TUI**，覆盖尽可能多的 session 管理能力
 
 本文输出：
@@ -325,8 +325,8 @@
 - `tests/e2e/cli-e2e.test.ts`
 
 **测试关注点**
-- `mm-coder completion bash`
-- `mm-coder completion zsh`
+- `mx-coder completion bash`
+- `mx-coder completion zsh`
 - 输出包含所有已知子命令
 
 **后写实现**

@@ -1,6 +1,6 @@
 # 给下游 Claude Code agent 的执行指令（阶段 3：文档收口与 Mattermost channel 策略）
 
-你现在接手 mm-coder (Multi-modal Coder) 的**阶段 3：文档收口与 Mattermost channel 策略设计增强**工作。你运行在 Claude Code CLI 中，请严格遵循现有设计，不要重新发散架构。
+你现在接手 mx-coder (Multi-modal Coder) 的**阶段 3：文档收口与 Mattermost channel 策略设计增强**工作。你运行在 Claude Code CLI 中，请严格遵循现有设计，不要重新发散架构。
 
 ## 你的目标
 

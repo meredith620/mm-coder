@@ -76,12 +76,12 @@ git commit -m "update"
 ```bash
 # ✅ 正确：Harness 变更单独提交
 git add .harness/ AGENTS.md harness.yaml
-git commit -m "harness: adapt to mm-coder TypeScript project
+git commit -m "harness: adapt to mx-coder TypeScript project
 
 - Rewrite specs/architecture.constraint.md for Node.js/TypeScript
 - Replace Rust test patterns with Vitest patterns
 - Add IPC/plugin system specification
-- Update guards for mm-coder file layout"
+- Update guards for mx-coder file layout"
 
 # ✅ 正确：源代码变更单独提交
 git add src/session-registry.ts tests/unit/session-registry.test.ts

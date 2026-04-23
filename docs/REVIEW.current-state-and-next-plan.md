@@ -1,4 +1,4 @@
-# mm-coder (Multi-modal Coder) 当前状态 review 与后续计划
+# mx-coder (Multi-modal Coder) 当前状态 review 与后续计划
 
 > **文档生命周期**：这是在 phase2-final 完成后，对当前实现与文档状态的复核记录。用于回答“现在是否可以进入 phase3、还剩哪些增强项、下一位 agent 该做什么”。  
 > 当 phase3 开始实施并推进后，本文件应被阶段性更新或归档，不要长期让它与 SPEC / TODO 并行漂移。

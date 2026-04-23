@@ -29,7 +29,7 @@ describe('IM Plugin Registry', () => {
   test('mattermost 工厂 getDefaultConfigPath 返回有效路径', () => {
     const factory = getIMPluginFactory('mattermost');
     const configPath = factory.getDefaultConfigPath();
-    expect(configPath).toContain('.mm-coder');
+    expect(configPath).toContain('.mx-coder');
     expect(configPath).toContain('config.json');
   });
 

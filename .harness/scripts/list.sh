@@ -11,7 +11,7 @@
 # Harness 发现脚本
 # 列出所有可用的 specs 和 scripts
 
-echo "📋 mm-coder Harness 文档清单"
+echo "📋 mx-coder Harness 文档清单"
 echo "=============================="
 echo ""
 

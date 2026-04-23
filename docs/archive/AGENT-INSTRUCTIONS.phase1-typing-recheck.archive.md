@@ -1,6 +1,6 @@
 # 给下游 Claude Code agent 的执行指令（阶段 1：typing 官方语义再核实与文档修正）
 
-你现在接手 mm-coder (Multi-modal Coder) 的**阶段 1：typing 官方语义再核实与文档修正**工作。你运行在 Claude Code CLI 中，请严格遵循现有设计，不要直接修改业务实现代码，除非在文档与证据核实后被明确要求。
+你现在接手 mx-coder (Multi-modal Coder) 的**阶段 1：typing 官方语义再核实与文档修正**工作。你运行在 Claude Code CLI 中，请严格遵循现有设计，不要直接修改业务实现代码，除非在文档与证据核实后被明确要求。
 
 ## 你的目标
 

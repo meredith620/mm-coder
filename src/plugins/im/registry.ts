@@ -23,7 +23,7 @@ const IM_PLUGINS: Record<string, IMPluginFactory> = {
     load: async (configPath: string, opts = {}) => {
       return createConnectedMattermostPlugin(configPath, opts);
     },
-    getDefaultConfigPath: () => path.join(os.homedir(), '.mm-coder', 'config.json'),
+    getDefaultConfigPath: () => path.join(os.homedir(), '.mx-coder', 'config.json'),
     writeConfigTemplate: writeMattermostConfigTemplate,
     verifyConnection: verifyMattermostConnection,
     getCommandHelpText: getMattermostCommandHelpText,

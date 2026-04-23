@@ -1,4 +1,4 @@
-# mm-coder (Multi-modal Coder) phase2 剩余收口项与进入 phase3 前检查清单
+# mx-coder (Multi-modal Coder) phase2 剩余收口项与进入 phase3 前检查清单
 
 > **文档生命周期**：这是 resident worker phase2 收口阶段的检查与交接文档。它只服务于“是否可以进入 phase3”这一判断窗口。  
 > 当本文件中的剩余项被完成、归档或明确延后到 phase3 后，应将本文件归档，避免未来 agent 继续把它当作长期真值来源。

@@ -61,7 +61,7 @@ describe('message delivery', () => {
 
   beforeEach(() => {
     registry = new SessionRegistry();
-    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'mm-coder-test-'));
+    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'mx-coder-test-'));
   });
 
   afterEach(() => {

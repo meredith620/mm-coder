@@ -1,4 +1,4 @@
-# mm-coder 实现切片清单（测试先行）
+# mx-coder 实现切片清单（测试先行）
 
 > **面向 AI agent 开发**：每个切片是一个独立的提交单元，包含"先写测试、再写实现"的明确约定。  
 > AI agent 执行时应按切片顺序处理，每个切片完成后提交（`git commit`），再开始下一个。  
@@ -285,7 +285,7 @@ import * as os from 'os';
 import * as fs from 'fs';
 
 test('写入后重新加载可恢复 session', async () => {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'mm-coder-test-'));
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'mx-coder-test-'));
   const store = new PersistenceStore(path.join(dir, 'sessions.json'));
   const r1 = new SessionRegistry(store);
   r1.create('test', { workdir: '/tmp', cliPlugin: 'claude-code' });
@@ -298,7 +298,7 @@ test('写入后重新加载可恢复 session', async () => {
 });
 
 test('重启后 attached/im_processing 状态重置为 recovering', async () => {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'mm-coder-test-'));
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'mx-coder-test-'));
   const store = new PersistenceStore(path.join(dir, 'sessions.json'));
   // 手动写入非干净状态
   fs.writeFileSync(path.join(dir, 'sessions.json'), JSON.stringify({
@@ -577,7 +577,7 @@ test('SESSION_BUSY 与 ACL_DENIED 返回不同错误码', async () => {
 ---
 
 ### S9 — attach 命令处理
-**目标**：`mm-coder attach` 通过 IPC 通知 daemon 标记 session，daemon 验证状态合法性；支持 initState 守卫和 attach 优先测试  
+**目标**：`mx-coder attach` 通过 IPC 通知 daemon 标记 session，daemon 验证状态合法性；支持 initState 守卫和 attach 优先测试  
 **依赖切片**：S8
 
 **测试文件**：`tests/integration/daemon-attach.test.ts`
@@ -662,7 +662,7 @@ test('idle 态并发 attach 和 IM 时，attach 优先', async () => {
 ---
 
 ### S10 — import 命令处理
-**目标**：`mm-coder import <session-id>` 导入外部已启动的 Claude Code session  
+**目标**：`mx-coder import <session-id>` 导入外部已启动的 Claude Code session  
 **依赖切片**：S8
 
 **测试文件**：`tests/integration/daemon-import.test.ts`
@@ -713,7 +713,7 @@ test('buildAttachCommand 生成 claude --resume', () => {
 });
 
 test('buildIMWorkerCommand 包含所有必要标志和 bridgeScriptPath', () => {
-  const bridgePath = '/tmp/mm-coder-mcp-bridge-uuid-123.js';
+  const bridgePath = '/tmp/mx-coder-mcp-bridge-uuid-123.js';
   const { command, args } = plugin.buildIMWorkerCommand(session, bridgePath);
   expect(args).toContain('-p');
   expect(args).toContain('--input-format');
@@ -1413,7 +1413,7 @@ test('updateMessage 调用 PUT /api/v4/posts/:id', async () => { /* ... */ });
 ## Phase 8：CLI 入口
 
 ### S21 — CLI 命令解析（index.ts）
-**目标**：`mm-coder` 命令解析正确，通过 IPC client 调用 daemon  
+**目标**：`mx-coder` 命令解析正确，通过 IPC client 调用 daemon  
 **依赖切片**：S7
 
 **测试文件**：`tests/unit/cli-parser.test.ts`
@@ -1442,17 +1442,17 @@ test('parse "import uuid-123 --name imported --workdir /tmp"', () => {
 **实现文件**：`src/index.ts`（CLI 入口）
 - 使用 `commander` 或手写参数解析
 - `parseCLIArgs` 可独立导出（便于测试）
-- `mm-coder start`：以 daemon 模式启动并 daemonize（fork + detach）
+- `mx-coder start`：以 daemon 模式启动并 daemonize（fork + detach）
 - 其余命令：创建 IPCClient → 发送请求 → 输出结果
 
 **验收**：`npm test -- cli-parser`
 
-**提交**：`feat(cli): command parser for all mm-coder subcommands`
+**提交**：`feat(cli): command parser for all mx-coder subcommands`
 
 ---
 
 ### S22 — attach 流程（attach 命令完整实现）
-**目标**：`mm-coder attach` 通知 daemon → 等待 IM 完成 → spawn 原生 AI CLI → 退出后通知 daemon  
+**目标**：`mx-coder attach` 通知 daemon → 等待 IM 完成 → spawn 原生 AI CLI → 退出后通知 daemon  
 **依赖切片**：S21、S9
 
 **测试文件**：`tests/integration/attach-flow.test.ts`
@@ -1460,7 +1460,7 @@ test('parse "import uuid-123 --name imported --workdir /tmp"', () => {
 // 使用 mock daemon（IPC server），mock claude 命令（立即退出的 shell 脚本）
 test('attach 完整流程：通知 daemon → spawn → 退出 → 通知 detach', async () => {
   // 1. mock daemon 记录收到的命令
-  // 2. 运行 mm-coder attach test
+  // 2. 运行 mx-coder attach test
   // 3. mock claude 退出（exit 0）
   // 4. 验证 daemon 收到 markDetached + exitReason=normal
 });
@@ -1510,7 +1510,7 @@ test('消息处理中崩溃 → 重启 → 状态恢复', async () => {
 ---
 
 ### S24 — TUI 模式（实时面板）
-**目标**：`mm-coder tui` 连接 daemon IPC，通过 `subscribe` 命令订阅 server-push 事件，实时更新 session 状态面板  
+**目标**：`mx-coder tui` 连接 daemon IPC，通过 `subscribe` 命令订阅 server-push 事件，实时更新 session 状态面板  
 **依赖切片**：S7、S6（subscribe 命令）
 
 **测试文件**：`tests/unit/tui-renderer.test.ts`

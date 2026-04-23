@@ -29,7 +29,7 @@ const session = {
 
 describe('ClaudeCodePlugin', () => {
   beforeEach(() => {
-    tmpWorkdir = fs.mkdtempSync(path.join(os.tmpdir(), 'mm-claude-plugin-'));
+    tmpWorkdir = fs.mkdtempSync(path.join(os.tmpdir(), 'mx-claude-plugin-'));
   });
 
   afterEach(() => {
@@ -79,7 +79,7 @@ describe('ClaudeCodePlugin', () => {
   });
 
   test('buildIMWorkerCommand 包含常驻 worker 所需标志', () => {
-    const bridgePath = '/tmp/mm-coder-mcp-bridge-uuid-123.js';
+    const bridgePath = '/tmp/mx-coder-mcp-bridge-uuid-123.js';
     const { command, args } = plugin.buildIMWorkerCommand(session, bridgePath);
     expect(command).toBe('claude');
     expect(args).toContain('-p');
@@ -107,22 +107,22 @@ describe('ClaudeCodePlugin', () => {
   });
 
   test('buildIMWorkerCommand 通过 --mcp-config 注入 bridge MCP server', () => {
-    const bridgePath = '/tmp/mm-coder-mcp-bridge-uuid-123.js';
+    const bridgePath = '/tmp/mx-coder-mcp-bridge-uuid-123.js';
     const { args } = plugin.buildIMWorkerCommand(session, bridgePath);
     const mcpIdx = args.indexOf('--mcp-config');
 
     expect(mcpIdx).toBeGreaterThan(-1);
-    expect(args[mcpIdx + 1]).toContain('mm_coder_bridge');
+    expect(args[mcpIdx + 1]).toContain('mx_coder_bridge');
     expect(args[mcpIdx + 1]).toContain(bridgePath);
   });
 
   test('buildIMWorkerCommand 使用 MCP tool 名而不是 shell 字符串 permission prompt tool', () => {
-    const bridgePath = '/tmp/mm-coder-mcp-bridge-uuid-123.js';
+    const bridgePath = '/tmp/mx-coder-mcp-bridge-uuid-123.js';
     const { args } = plugin.buildIMWorkerCommand(session, bridgePath);
     const ptIdx = args.indexOf('--permission-prompt-tool');
 
     expect(ptIdx).toBeGreaterThan(-1);
-    expect(args[ptIdx + 1]).toBe('mcp__mm_coder_bridge__can_use_tool');
+    expect(args[ptIdx + 1]).toBe('mcp__mx_coder_bridge__can_use_tool');
   });
 
   test('buildIMMessageCommand 已从主插件契约退役', () => {

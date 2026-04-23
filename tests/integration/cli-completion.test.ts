@@ -14,7 +14,7 @@ const TSX_CLI = path.resolve(__dirname, '../../node_modules/tsx/dist/cli.mjs');
 function runCLI(args: string[], socketPath: string): Promise<{ stdout: string; stderr: string; code: number }> {
   return new Promise((resolve) => {
     const child = spawn(process.execPath, [TSX_CLI, SRC_INDEX, ...args], {
-      env: { ...process.env, MM_CODER_SOCKET: socketPath },
+      env: { ...process.env, MX_CODER_SOCKET: socketPath },
       stdio: ['ignore', 'pipe', 'pipe'],
     });
 
@@ -33,7 +33,7 @@ describe('CLI completion 动态 session 名补全', () => {
   let client: IPCClient;
 
   beforeEach(async () => {
-    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'mm-cli-completion-'));
+    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'mx-cli-completion-'));
     socketPath = path.join(tmpDir, 'daemon.sock');
     daemon = new Daemon(socketPath);
     await daemon.start();

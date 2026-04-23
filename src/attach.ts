@@ -16,7 +16,7 @@ export interface AttachOptions {
 
 function appendAttachLog(payload: Record<string, unknown>): void {
   try {
-    const logPath = process.env.MM_CODER_ATTACH_LOG ?? path.join(os.homedir(), '.mm-coder', 'attach.log');
+    const logPath = process.env.MX_CODER_ATTACH_LOG ?? path.join(os.homedir(), '.mx-coder', 'attach.log');
     fs.mkdirSync(path.dirname(logPath), { recursive: true });
     fs.appendFileSync(logPath, `${JSON.stringify({ at: new Date().toISOString(), ...payload })}\n`, 'utf-8');
   } catch {

@@ -361,7 +361,7 @@ export class Daemon {
     if (!msg.isTopLevel && trimmed.startsWith('/')) {
       await imPlugin.sendMessage(this._buildReplyTarget(msg, channelId), {
         kind: 'text',
-        text: `命令 \`${trimmed.split(' ')[0]}\` 不支持在 IM 中使用，请使用 mm-coder CLI。`,
+        text: `命令 \`${trimmed.split(' ')[0]}\` 不支持在 IM 中使用，请使用 mx-coder CLI。`,
       });
       return;
     }
@@ -599,7 +599,7 @@ export class Daemon {
     const detached = sessions.filter(s => s.status === 'idle').length;
     const imProcessing = sessions.filter(s => s.status === 'im_processing').length;
     return [
-      `**mm-coder 全局状态**`,
+      `**mx-coder 全局状态**`,
       `会话总数：${total}`,
       `attached：${attached}　im_processing：${imProcessing}　idle：${detached}`,
       total > 0 ? '\n发送 `/list` 查看详细列表，`/open <name>` 定位到对应 thread。' : '\n直接发送消息即可创建新会话。',
@@ -649,7 +649,7 @@ export class Daemon {
   private _renderIMSessionList(pluginName: string): string {
     const sessions = this.registry.list();
     if (sessions.length === 0) {
-      return '当前没有 mm-coder 会话。直接发送一条消息即可创建新会话。';
+      return '当前没有 mx-coder 会话。直接发送一条消息即可创建新会话。';
     }
 
     const lines = sessions.map((session) => {
@@ -663,7 +663,7 @@ export class Daemon {
     });
 
     return [
-      '当前 mm-coder 会话：',
+      '当前 mx-coder 会话：',
       ...lines,
       '',
       '发送 /open <sessionName> 可在对应 thread 中收到定位消息。',
@@ -706,7 +706,7 @@ export class Daemon {
       }
       await imPlugin.sendMessage(this._buildReplyTarget(msg, channelId), {
         kind: 'text',
-        text: `已请求接管会话 ${sessionName}。请在终端退出 attach，或在终端执行 mm-coder takeover-cancel ${sessionName} 取消。若需立即接管，请使用 /takeover-force ${sessionName}。`,
+        text: `已请求接管会话 ${sessionName}。请在终端退出 attach，或在终端执行 mx-coder takeover-cancel ${sessionName} 取消。若需立即接管，请使用 /takeover-force ${sessionName}。`,
       });
       this._debugLog({ event: 'takeover_requested', sessionName, requestedBy: msg.userId });
       return;
@@ -774,7 +774,7 @@ export class Daemon {
     if (!session) {
       await imPlugin.sendMessage(this._buildReplyTarget(msg, channelId), {
         kind: 'text',
-        text: `未找到会话 ${sessionName}，请先使用 mm-coder create 创建。`,
+        text: `未找到会话 ${sessionName}，请先使用 mx-coder create 创建。`,
       });
       return;
     }

@@ -1,4 +1,4 @@
-# mm-coder 第二阶段 resident worker 迁移交付总结
+# mx-coder 第二阶段 resident worker 迁移交付总结
 
 更新时间：2026-04-18
 

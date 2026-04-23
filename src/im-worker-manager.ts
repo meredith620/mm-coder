@@ -50,7 +50,7 @@ export class IMWorkerManager {
 
       const bridgePath = await generateBridgeScript(
         session.sessionId,
-        this._approvalSocketPath ?? `/tmp/mm-coder-approval-${session.sessionId}.sock`,
+        this._approvalSocketPath ?? `/tmp/mx-coder-approval-${session.sessionId}.sock`,
       );
       const { command, args } = this._resolvePlugin(session).buildIMWorkerCommand(session, bridgePath);
       const proc = spawn(command, args, {

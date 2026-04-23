@@ -7,7 +7,7 @@ import * as fs from 'fs';
 
 describe('PersistenceStore', () => {
   test('写入后重新加载可恢复 session', async () => {
-    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'mm-coder-test-'));
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'mx-coder-test-'));
     const store = new PersistenceStore(path.join(dir, 'sessions.json'));
     const r1 = new SessionRegistry(store);
     r1.create('test', { workdir: '/tmp', cliPlugin: 'claude-code' });
@@ -20,7 +20,7 @@ describe('PersistenceStore', () => {
   });
 
   test('重启后 attached/im_processing 状态重置为 idle+cold 并带 recovery metadata', async () => {
-    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'mm-coder-test-'));
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'mx-coder-test-'));
     const store = new PersistenceStore(path.join(dir, 'sessions.json'));
     // 手动写入非干净状态
     fs.writeFileSync(path.join(dir, 'sessions.json'), JSON.stringify({
@@ -37,7 +37,7 @@ describe('PersistenceStore', () => {
   });
 
   test('重启后 ready worker 不恢复为 ready，而是 cold', async () => {
-    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'mm-coder-test-'));
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'mx-coder-test-'));
     fs.writeFileSync(path.join(dir, 'sessions.json'), JSON.stringify({
       version: 1,
       sessions: [{
@@ -60,7 +60,7 @@ describe('PersistenceStore', () => {
   });
 
   test('approval_pending 重启后 fail-closed 为 idle+cold，并保留 recovery metadata', async () => {
-    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'mm-coder-test-'));
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'mx-coder-test-'));
     fs.writeFileSync(path.join(dir, 'sessions.json'), JSON.stringify({
       version: 1,
       sessions: [{ name: 'approval-broken', status: 'approval_pending', cliPlugin: 'claude-code', workdir: '/tmp', sessionId: 'sess-approval' }],
@@ -78,7 +78,7 @@ describe('PersistenceStore', () => {
   });
 
   test('重启后 running/waiting_approval 消息恢复为 pending，waiting_approval 同时标记 approvalState=expired', async () => {
-    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'mm-coder-test-'));
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'mx-coder-test-'));
     fs.writeFileSync(path.join(dir, 'sessions.json'), JSON.stringify({
       version: 1,
       sessions: [{
@@ -105,7 +105,7 @@ describe('PersistenceStore', () => {
   });
 
   test('持久化后保留 session 实际绑定空间类型', async () => {
-    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'mm-coder-test-'));
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'mx-coder-test-'));
     const store = new PersistenceStore(path.join(dir, 'sessions.json'));
     const registry = new SessionRegistry(store);
     registry.create('thread-sess', { workdir: '/tmp/thread', cliPlugin: 'claude-code' });

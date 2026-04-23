@@ -38,11 +38,11 @@ npm test             # vitest run
 ```bash
 # 完整分发包
 npm run dist
-# 输出: dist/mm-coder-{VERSION}-{OS}-{ARCH}.tar.gz
+# 输出: dist/mx-coder-{VERSION}-{OS}-{ARCH}.tar.gz
 
 # 包含安装脚本
 npm run dist:install
-# 输出: dist/mm-coder-{VERSION}-{ARCH}-install.sh
+# 输出: dist/mx-coder-{VERSION}-{ARCH}-install.sh
 ```
 
 ## 版本管理
@@ -82,9 +82,9 @@ VERSION := $(shell node -p "require('./package.json').version")
 ## 分发包内容
 
 ```
-mm-coder-{VERSION}-{OS}-{ARCH}.tar.gz
+mx-coder-{VERSION}-{OS}-{ARCH}.tar.gz
 ├── bin/
-│   └── mm-coder            # CLI 可执行文件
+│   └── mx-coder            # CLI 可执行文件
 ├── share/
 │   └── config/
 │       └── config.yaml.template  # 配置模板
@@ -106,14 +106,14 @@ mm-coder-{VERSION}-{OS}-{ARCH}.tar.gz
    - 磁盘空间
 
 2. 创建目录结构
-   ~/.config/mm-coder/
-   ├── bin/mm-coder
+   ~/.config/mx-coder/
+   ├── bin/mx-coder
    └── sessions.json
 
 3. 复制文件
 
 4. 创建 systemd 用户服务（可选）
-   ~/.config/systemd/user/mm-coder.service
+   ~/.config/systemd/user/mx-coder.service
 
 5. 提示用户编辑配置
 ```
@@ -122,8 +122,8 @@ mm-coder-{VERSION}-{OS}-{ARCH}.tar.gz
 
 | 路径 | 用途 | 说明 |
 |------|------|------|
-| `~/.config/mm-coder/` | 配置目录 | 用户级，无需 root |
-| `~/.config/mm-coder/sessions.json` | Session 元数据 | daemon 管理 |
+| `~/.config/mx-coder/` | 配置目录 | 用户级，无需 root |
+| `~/.config/mx-coder/sessions.json` | Session 元数据 | daemon 管理 |
 | `~/.config/systemd/user/` | 服务配置 | systemd 用户服务（可选）|
 
 ### 检查脚本

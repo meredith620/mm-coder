@@ -39,9 +39,9 @@ function requireNonEmptyString(value: unknown, fieldName: string, configPath: st
   return value;
 }
 
-/** Default config path: ~/.mm-coder/config.json */
+/** Default config path: ~/.mx-coder/config.json */
 export function getDefaultMattermostConfigPath(): string {
-  return path.join(os.homedir(), '.mm-coder', 'config.json');
+  return path.join(os.homedir(), '.mx-coder', 'config.json');
 }
 
 export function ensureMattermostConfigDir(configPath = getDefaultMattermostConfigPath()): void {
@@ -145,10 +145,10 @@ export function loadMattermostConfig(configPath = getDefaultMattermostConfigPath
 
 export function getMattermostCommandHelpText(): string {
   return [
-    '**mm-coder 可用命令**：',
+    '**mx-coder 可用命令**：',
     '',
     '`/help` — 显示本帮助',
-    '`/list` — 列出所有 mm-coder session 及绑定 thread',
+    '`/list` — 列出所有 mx-coder session 及绑定 thread',
     '`/status` — 显示当前 session 状态（在 thread 中）或全局统计（在主频道）',
     '`/open <sessionName>` — 为未绑定 session 创建独立 thread；已有绑定则跳转到对应 thread',
     '`/takeover <sessionName>` — 请求接管当前被终端占用的会话',
@@ -161,7 +161,7 @@ export function getMattermostCommandHelpText(): string {
 
 export function getMattermostWelcomeText(username: string, sessionCount: number, activeCount: number): string {
   return [
-    `**mm-coder** 已连接 (\`${username}\`)`,
+    `**mx-coder** 已连接 (\`${username}\`)`,
     `当前会话：${sessionCount} 个，活跃中：${activeCount} 个`,
     '发送 `/help` 查看可用命令。',
   ].join('\n');

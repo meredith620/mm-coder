@@ -19,8 +19,8 @@ function runCLI(args: string[], opts: { socketPath?: string; pidFile?: string } 
   return new Promise((resolve) => {
     const env: NodeJS.ProcessEnv = {
       ...process.env,
-      MM_CODER_SOCKET: opts.socketPath,
-      MM_CODER_PID_FILE: opts.pidFile,
+      MX_CODER_SOCKET: opts.socketPath,
+      MX_CODER_PID_FILE: opts.pidFile,
     };
 
     const child = spawn(process.execPath, [TSX_CLI, SRC_INDEX, ...args], {
@@ -36,7 +36,7 @@ function runCLI(args: string[], opts: { socketPath?: string; pidFile?: string } 
   });
 }
 
-describe('mm-coder CLI E2E', () => {
+describe('mx-coder CLI E2E', () => {
   let tmpDir: string;
   let socketPath: string;
   let pidFile: string;
@@ -68,16 +68,16 @@ describe('mm-coder CLI E2E', () => {
     const restartLog = path.join(tmpDir, 'restart-daemon.log');
 
     const startResult = await runCLIWithSocket(['start'], restartSocket, restartPidFile, {
-      MM_CODER_SESSIONS: restartSessions,
-      MM_CODER_LOG: restartLog,
+      MX_CODER_SESSIONS: restartSessions,
+      MX_CODER_LOG: restartLog,
     });
     expect(startResult.code).toBe(0);
     expect(startResult.stdout).toContain('Daemon started');
 
     const beforePid = fs.readFileSync(restartPidFile, 'utf8').trim();
     const { stdout, code } = await runCLIWithSocket(['restart'], restartSocket, restartPidFile, {
-      MM_CODER_SESSIONS: restartSessions,
-      MM_CODER_LOG: restartLog,
+      MX_CODER_SESSIONS: restartSessions,
+      MX_CODER_LOG: restartLog,
     });
     expect(code).toBe(0);
     expect(stdout).toContain('Restarting daemon...');
@@ -91,8 +91,8 @@ describe('mm-coder CLI E2E', () => {
     expect(afterPid).not.toBe(beforePid);
 
     const stopResult = await runCLIWithSocket(['stop'], restartSocket, restartPidFile, {
-      MM_CODER_SESSIONS: restartSessions,
-      MM_CODER_LOG: restartLog,
+      MX_CODER_SESSIONS: restartSessions,
+      MX_CODER_LOG: restartLog,
     });
     expect(stopResult.code).toBe(0);
   });
@@ -104,8 +104,8 @@ describe('mm-coder CLI E2E', () => {
     const restartLog = path.join(tmpDir, 'restart-stopped.log');
 
     const { stdout, code } = await runCLIWithSocket(['restart'], restartSocket, restartPidFile, {
-      MM_CODER_SESSIONS: restartSessions,
-      MM_CODER_LOG: restartLog,
+      MX_CODER_SESSIONS: restartSessions,
+      MX_CODER_LOG: restartLog,
     });
     expect(code).toBe(0);
     expect(stdout).toContain('Restarting daemon...');
@@ -114,8 +114,8 @@ describe('mm-coder CLI E2E', () => {
     expect(stdout).toContain('Daemon started');
 
     const stopResult = await runCLIWithSocket(['stop'], restartSocket, restartPidFile, {
-      MM_CODER_SESSIONS: restartSessions,
-      MM_CODER_LOG: restartLog,
+      MX_CODER_SESSIONS: restartSessions,
+      MX_CODER_LOG: restartLog,
     });
     expect(stopResult.code).toBe(0);
   });
@@ -136,7 +136,7 @@ describe('mm-coder CLI E2E', () => {
   test('completion zsh 输出静态补全脚本', async () => {
     const { stdout, code } = await runCLIWithSocket(['completion', 'zsh'], socketPath, pidFile);
     expect(code).toBe(0);
-    expect(stdout).toContain('#compdef mm-coder');
+    expect(stdout).toContain('#compdef mx-coder');
     expect(stdout).toContain('create');
     expect(stdout).toContain('attach');
     expect(stdout).toContain('diagnose');
@@ -149,7 +149,7 @@ describe('mm-coder CLI E2E', () => {
   test('无参数输出帮助信息', async () => {
     const { stdout, code } = await runCLIWithSocket([], socketPath, pidFile);
     expect(code).toBe(0);
-    expect(stdout).toContain('mm-coder');
+    expect(stdout).toContain('mx-coder');
   });
 
   test('create 支持单次 spaceStrategy override 且不报错', async () => {
@@ -350,7 +350,7 @@ describe('mm-coder CLI E2E', () => {
   });
 });
 
-describe('mm-coder CLI attach 完整流程 E2E', () => {
+describe('mx-coder CLI attach 完整流程 E2E', () => {
   let tmpDir: string;
   let socketPath: string;
   let daemon: Daemon;
@@ -417,8 +417,8 @@ function runCLIWithSocket(
   return new Promise((resolve) => {
     const env: NodeJS.ProcessEnv = {
       ...process.env,
-      MM_CODER_SOCKET: socketPath,
-      ...(pidFile && { MM_CODER_PID_FILE: pidFile }),
+      MX_CODER_SOCKET: socketPath,
+      ...(pidFile && { MX_CODER_PID_FILE: pidFile }),
       ...extraEnv,
     };
 

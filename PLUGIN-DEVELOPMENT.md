@@ -1,6 +1,6 @@
 # Plugin Development Guide
 
-mm-coder 支持两类插件：
+mx-coder 支持两类插件：
 - **CLI 插件**：负责构造 attach / IM worker / 单条 IM 消息的命令
 - **IM 插件**：负责接收消息、发送消息、创建可更新消息、发审批请求
 
@@ -46,7 +46,7 @@ export class ClaudeCodePlugin implements CLIPlugin {
         '--input-format', 'stream-json',
         '--output-format', 'stream-json',
         '--verbose',
-        '--permission-prompt-tool', `mcp__mm-coder-bridge__permission_prompt:${bridgeScriptPath}`,
+        '--permission-prompt-tool', `mcp__mx-coder-bridge__permission_prompt:${bridgeScriptPath}`,
       ],
     };
   }
@@ -133,7 +133,7 @@ export interface IMPluginFactory {
 const IM_PLUGINS: Record<string, IMPluginFactory> = {
   'mattermost': {
     load: async (configPath, opts = {}) => createConnectedMattermostPlugin(configPath, opts),
-    getDefaultConfigPath: () => path.join(os.homedir(), '.mm-coder', 'config.json'),
+    getDefaultConfigPath: () => path.join(os.homedir(), '.mx-coder', 'config.json'),
     writeConfigTemplate: writeMattermostConfigTemplate,
     verifyConnection: verifyMattermostConnection,
     getCommandHelpText: getMattermostCommandHelpText,

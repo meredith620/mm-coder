@@ -1,6 +1,6 @@
 # 给下游 Claude Code agent 的执行指令（阶段 2：phase3 功能开发）
 
-你现在接手 mm-coder (Multi-modal Coder) 的**阶段 2：phase3 功能开发**工作。你运行在 Claude Code CLI 中，请严格遵循既定设计与排期，不要重新发散架构。
+你现在接手 mx-coder (Multi-modal Coder) 的**阶段 2：phase3 功能开发**工作。你运行在 Claude Code CLI 中，请严格遵循既定设计与排期，不要重新发散架构。
 
 ## 你的目标
 

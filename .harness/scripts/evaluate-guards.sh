@@ -126,7 +126,7 @@ for rule_file in $RULE_FILES; do
                 for sh_file in $shell_files; do
                     if grep -qE "$pattern" "$sh_file" 2>/dev/null; then
                         echo -e "  ${RED}❌ 违规: $sh_file 包含直接 sessions.json 修改${NC}"
-                        echo -e "     请通过 mm-coder 命令或 daemon IPC 修改"
+                        echo -e "     请通过 mx-coder 命令或 daemon IPC 修改"
                         TOTAL_VIOLATIONS=$((TOTAL_VIOLATIONS + 1))
                     fi
                 done
