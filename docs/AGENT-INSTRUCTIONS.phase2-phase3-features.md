@@ -27,11 +27,11 @@
 3. `docs/TODO.md`
 4. `docs/STATE-INVARIANTS.md`
 5. `docs/EVENT-SEMANTICS.md`
-6. `docs/IMPL-SLICES.resident-worker-tdd.md`
+6. `docs/archive/IMPL-SLICES.resident-worker-tdd.archive.md`
 
 若需要了解当前主链与问题修复背景，再读：
-7. `docs/REVIEW.phase2-and-current-issues.md`
-8. `docs/CURRENT-ISSUES.typing-and-remove.md`
+7. `docs/archive/REVIEW.phase2-and-current-issues.archive.md`
+8. `docs/archive/CURRENT-ISSUES.typing-and-remove.archive.md`
 9. `docs/MATTERMOST-GAPS.md`
 
 然后再读这些代码：
