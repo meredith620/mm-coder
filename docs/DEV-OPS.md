@@ -93,12 +93,13 @@ npm unlink
 ### CLI 插件
 
 1. 实现 `src/plugins/types.ts` 中的 `CLIPlugin`
-2. 至少提供以下三个命令构造函数：
+2. 必须提供以下 3 个能力：
    - `buildAttachCommand(session)`
    - `buildIMWorkerCommand(session, bridgeScriptPath)`
-   - `buildIMMessageCommand(session, prompt)`
-3. 在 `src/plugins/cli/registry.ts` 注册插件工厂
-4. 如需作为默认插件，修改 registry 中的默认插件常量
+   - `generateSessionId()`
+3. 如需兼容旧的单条消息路径，可额外实现 `LegacyIMMessageCLIPlugin.buildIMMessageCommand(session, prompt)`，但当前主链不应依赖它
+4. 在 `src/plugins/cli/registry.ts` 注册插件工厂
+5. 如需作为默认插件，修改 registry 中的默认插件常量
 
 当前默认 CLI 插件名：`claude-code`
 
@@ -115,6 +116,16 @@ npm unlink
 4. `IncomingMessage.plugin` 必须稳定标识该 IM 插件名，供 daemon 做动态路由
 
 当前默认 IM 插件名：`mattermost`
+
+### 当前插件接口约束
+
+- `buildAttachCommand()` 必须返回可直接进入交互式会话的命令
+- `buildIMWorkerCommand()` 用于常驻 IM worker，不是单次 prompt 命令
+- `sendMessage()` / `createLiveMessage()` / `updateMessage()` 必须尊重 `MessageTarget.threadId/channelId`
+- 若平台支持独立 channel 型会话空间，可实现可选能力 `createChannelConversation()`
+- 若平台支持交互式审批，可实现可选能力 `addReactions()` / `listReactions()`
+- 若平台支持 typing，可实现可选能力 `sendTyping()`
+- `disconnect()` 必须幂等，daemon 停止时会统一调用
 
 ### 动态路由约束
 
