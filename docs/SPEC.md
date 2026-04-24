@@ -142,7 +142,19 @@ IM 交互:
        → 当前消息完成后，worker 不退出；session 回到 worker-ready 状态，继续等待下一条 IM 消息
 ```
 
-### 2.4 IM 消息路由与会话空间策略
+### 2.5 原生 CLI 命令穿透 (Native Passthrough)
+
+为支持不同底层 Coder CLI 的原生特有命令（如 Claude Code 的 `/effort`, Gemini 的 `/model`），定义穿透语法：
+
+- **语法**：`//<command>` （以双斜杠开头）
+- **路由逻辑**：
+  - IM Worker 识别到 `//` 前缀。
+  - 剥离首个 `/`，将剩余部分（保留一个 `/`）作为标准输入发送给底层 Coder CLI。
+  - 例如：IM 输入 `//compact` -> Coder CLI 接收到 `/compact`。
+- **权限**：穿透命令视同 `shell_dangerous` 级别，必须由具有 `operator` 权限的用户发起。
+- **冲突处理**：以单斜杠 `/` 开头的命令（如 `/status`）始终优先解析为 mx-coder 控制命令。
+
+### 2.6 IM 消息路由与会话空间策略
 
 ```
 Channel 主消息流 → 信息/导航命令（/help, /list, /status, /open）+ 顶层普通文本

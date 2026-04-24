@@ -59,6 +59,42 @@ echo 'eval "$(mx-coder completion bash)"' >> ~/.bashrc
 source ~/.bashrc
 ```
 
+## 3. Systemd 集成
+
+为了确保 `mx-coder daemon` 在后台稳定运行并随系统自启，建议使用 systemd user 模式。
+
+### 3.1 自动配置
+
+执行以下命令自动安装服务：
+```bash
+mx-coder setup systemd --user
+```
+
+### 3.2 服务模板 (mx-coder.service)
+
+```ini
+[Unit]
+Description=mx-coder Daemon
+After=network.target
+
+[Service]
+Type=simple
+ExecStart=%h/.nvm/versions/node/v20.x.x/bin/mx-coder daemon
+Restart=always
+RestartSec=5
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=default.target
+```
+
+### 3.3 常用操作
+
+- **查看日志**：`journalctl --user -u mx-coder -f`
+- **重启服务**：`systemctl --user restart mx-coder`
+- **查看状态**：`systemctl --user status mx-coder`
+
 #### Zsh
 
 ```bash
