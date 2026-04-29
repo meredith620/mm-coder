@@ -14,7 +14,7 @@ English README: [README.en.md](README.en.md)
 - **IM 常驻会话 worker**：每个活跃 session 维护一个常驻 Claude 进程，后续消息连续写入同一 stdin
 - **终端优先与接管**：终端占用时，IM 普通消息会被拒绝；可通过 takeover 请求或强制接管
 - **多会话并行**：同时管理多个独立 session
-- **IM 原生命令穿透**：支持通过 `//<cmd>` 把原生命令透传给底层 coder CLI
+- **IM 原生命令穿透**：支持通过 `//<cmd>` 把原生命令透传给底层 coder CLI，详见 [docs/NATIVE-COMMANDS.md](docs/NATIVE-COMMANDS.md)
 - **Mattermost 连接自愈**：WebSocket 具备应用层活性检测与主动重连
 - **清晰的运行态语义**：区分 `cold / ready / running / waiting_approval / attached_terminal` 等状态
 - **插件化扩展**：支持扩展不同 IM 平台与不同 coder CLI
@@ -131,6 +131,7 @@ source ~/.zshrc
 
 ### 使用者文档
 
+- [docs/NATIVE-COMMANDS.md](docs/NATIVE-COMMANDS.md) — mx-coder 支持的原生指令列表（Claude Code）
 - [docs/SPEC.md](docs/SPEC.md) — 当前设计规格与核心行为真值
 - [docs/RESEARCH.mattermost-typing-semantics.md](docs/RESEARCH.mattermost-typing-semantics.md) — Mattermost typing 官方语义核对
 
